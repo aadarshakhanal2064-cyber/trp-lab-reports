@@ -115,18 +115,48 @@ export async function searchPatientsDb(query: string): Promise<Patient[]> {
   return (data as PatientRow[]).map(toPatient);
 }
 
-export async function findDuplicates(name: string): Promise<Patient[]> {
+export interface PatientMatch extends Patient {
+  /** 0-1. Same phone alone scores 0.60; name and age make up the rest. */
+  score: number;
+  /** Plain-language explanation, shown to the technician. */
+  reason: string;
+}
+
+/**
+ * Scored duplicate detection.
+ *
+ * Two different people in Chitwan really can share a name, so a name match
+ * never asserts identity on its own — the caller shows the reason and the
+ * technician decides. Phone is the strongest identifier the clinic collects.
+ */
+export async function findSimilarPatients(
+  name: string,
+  phone?: string,
+  age?: number,
+): Promise<PatientMatch[]> {
   const trimmed = name.trim();
   if (trimmed.length < 3) return [];
-  const safe = trimmed.replace(/[%,()]/g, " ");
-  const { data, error } = await supabase
-    .from("patients")
-    .select("id, mrn, full_name, sex, age_years, phone, address, referred_by")
-    .eq("is_deleted", false)
-    .ilike("full_name", safe)
-    .limit(5);
+
+  const { data, error } = await supabase.rpc("find_similar_patients", {
+    p_name: trimmed,
+    p_phone: phone?.trim() || null,
+    p_age: age && age > 0 ? age : null,
+  });
+
   if (error) return [];
-  return (data as PatientRow[]).map(toPatient);
+
+  return ((data ?? []) as (PatientRow & { score: number; reason: string })[]).map(
+    (r) => ({ ...toPatient(r), score: Number(r.score), reason: r.reason }),
+  );
+}
+
+/** Fuzzy patient search for the list and the global search box. */
+export async function fuzzySearchPatients(query: string): Promise<PatientMatch[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+  // A digit-heavy query is a phone number or an MRN, not a name.
+  const isNumeric = /^[0-9+\s-]+$/.test(trimmed);
+  return findSimilarPatients(trimmed, isNumeric ? trimmed : undefined);
 }
 
 export async function createPatient(
@@ -153,6 +183,30 @@ export async function createPatient(
   const saved = toPatient(data as PatientRow);
   await audit(actorId, "patient.create", "patient", saved.id);
   return saved;
+}
+
+export async function updatePatient(
+  patient: Patient,
+  actorId: string,
+): Promise<Patient> {
+  const { data, error } = await supabase
+    .from("patients")
+    .update({
+      full_name: patient.fullName,
+      sex: patient.sex,
+      age_years: patient.ageYears,
+      phone: patient.phone || null,
+      address: patient.address || null,
+      referred_by: patient.referredBy || null,
+    })
+    .eq("id", patient.id)
+    .select("id, mrn, full_name, sex, age_years, phone, address, referred_by")
+    .single();
+
+  if (error) throw new Error(`Could not update the patient: ${error.message}`);
+  // Field names only — never the values, which are patient identifiers.
+  await audit(actorId, "patient.update", "patient", patient.id);
+  return toPatient(data as PatientRow);
 }
 
 async function nextMrnDb(): Promise<string> {
@@ -207,6 +261,31 @@ export async function createOrder(
     panel_count: panelIds.length,
   });
   return data.id as string;
+}
+
+/** Changes which panels an order covers, without creating a second order. */
+export async function updateOrderPanels(
+  orderId: string,
+  panelIds: string[],
+): Promise<void> {
+  const { error } = await supabase
+    .from("lab_orders")
+    .update({ panel_ids: panelIds })
+    .eq("id", orderId)
+    .neq("status", "released");
+  if (error) throw new Error(`Could not update the order: ${error.message}`);
+}
+
+/** Removes results for panels no longer on the order, so nothing orphaned prints. */
+export async function pruneResults(
+  orderId: string,
+  keepPanelIds: string[],
+): Promise<void> {
+  await supabase
+    .from("results")
+    .delete()
+    .eq("lab_order_id", orderId)
+    .not("panel_id", "in", `(${keepPanelIds.map((p) => `"${p}"`).join(",")})`);
 }
 
 export async function saveResults(
@@ -374,4 +453,58 @@ export async function analyteHistory(
     }
   }
   return out;
+}
+
+
+/* ---------------------------------------------------------------- */
+/* Organisation                                                      */
+/* ---------------------------------------------------------------- */
+
+export interface Organisation {
+  clinic_name: string;
+  address: string;
+  phone: string;
+  email: string;
+  registration_no: string;
+  letterhead_mode: "full" | "preprinted";
+  preprinted_top_mm: number;
+  verifier_name: string;
+  verifier_qualification: string;
+  verifier_nmc: string;
+}
+
+const ORG_FIELDS =
+  "clinic_name, address, phone, email, registration_no, letterhead_mode, " +
+  "preprinted_top_mm, verifier_name, verifier_qualification, verifier_nmc";
+
+export async function loadOrganisation(): Promise<Organisation | null> {
+  const { data, error } = await supabase
+    .from("organisation")
+    .select(ORG_FIELDS)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as unknown as Organisation;
+}
+
+/**
+ * Admin-only. The database enforces that too — this is not merely a hidden
+ * button, so a technician cannot change clinic-wide settings via the API.
+ */
+export async function saveOrganisation(
+  org: Organisation,
+  actorId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("organisation")
+    .update({ ...org, updated_by: actorId, updated_at: new Date().toISOString() })
+    .eq("id", true);
+
+  if (error) {
+    throw new Error(
+      error.message.includes("policy")
+        ? "Only an administrator can change clinic settings."
+        : `Could not save clinic settings: ${error.message}`,
+    );
+  }
+  await audit(actorId, "organisation.update", "organisation");
 }

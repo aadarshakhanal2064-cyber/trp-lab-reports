@@ -21,16 +21,20 @@ import {
   initialsOf,
 } from "./Icons";
 
+export type OrderTab = "All" | "Pending" | "Verified" | "Released";
+
 interface Props {
   stats: DashboardStats;
   activity: ActivityItem[];
   orders: ReportRecord[];
+  tab: OrderTab;
+  onTab: (t: OrderTab) => void;
   onOpenOrder: (r: ReportRecord) => void;
   onNewOrder: () => void;
   onViewAll: () => void;
+  onOpenKpi: (which: OrderTab | "patients") => void;
 }
 
-type OrderTab = "All" | "Pending" | "Verified" | "Released";
 const TABS: OrderTab[] = ["All", "Pending", "Verified", "Released"];
 
 const COLS = "1.5fr 1fr 1.4fr 1fr .9fr .9fr 60px";
@@ -61,11 +65,13 @@ export function Dashboard({
   stats,
   activity,
   orders,
+  tab,
+  onTab,
   onOpenOrder,
   onNewOrder,
   onViewAll,
+  onOpenKpi,
 }: Props) {
-  const [tab, setTab] = useState<OrderTab>("All");
   const [find, setFind] = useState("");
 
   const peak = Math.max(1, ...stats.weeklyVolume.map((d) => d.count));
@@ -94,7 +100,7 @@ export function Dashboard({
   return (
     <>
       <div className="grid cols-4">
-        <div className="kpi">
+        <button className="kpi" onClick={() => onOpenKpi("patients")} title="Open the patient register">
           <div className="kpi-top">
             <span className="kpi-label">Total patients</span>
             <IconUser size={17} />
@@ -106,9 +112,9 @@ export function Dashboard({
             </span>
             <span className="kpi-caption">new this week</span>
           </div>
-        </div>
+        </button>
 
-        <div className="kpi">
+        <button className="kpi" onClick={() => onOpenKpi("All")} title="Show all lab orders">
           <div className="kpi-top">
             <span className="kpi-label">Reports today</span>
             <IconFile size={17} />
@@ -117,9 +123,9 @@ export function Dashboard({
           <div className="kpi-foot">
             <span className="kpi-caption">orders since midnight</span>
           </div>
-        </div>
+        </button>
 
-        <div className="kpi">
+        <button className="kpi" onClick={() => onOpenKpi("Pending")} title="Show orders awaiting verification">
           <div className="kpi-top">
             <span className="kpi-label">Awaiting verification</span>
             <IconAlert size={17} />
@@ -133,9 +139,9 @@ export function Dashboard({
             )}
             <span className="kpi-caption">verifier queue</span>
           </div>
-        </div>
+        </button>
 
-        <div className="kpi">
+        <button className="kpi" onClick={() => onOpenKpi("Released")} title="Show released reports">
           <div className="kpi-top">
             <span className="kpi-label">Released today</span>
             <IconCheck size={17} />
@@ -144,7 +150,7 @@ export function Dashboard({
           <div className="kpi-foot">
             <span className="kpi-caption">finalised &amp; printed</span>
           </div>
-        </div>
+        </button>
       </div>
 
       <div className="card mt">
@@ -155,7 +161,7 @@ export function Dashboard({
                 key={t}
                 className={`tab ${tab === t ? "on" : ""}`}
                 aria-pressed={tab === t}
-                onClick={() => setTab(t)}
+                onClick={() => onTab(t)}
               >
                 {t}
               </button>

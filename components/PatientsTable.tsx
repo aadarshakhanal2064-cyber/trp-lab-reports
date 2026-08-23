@@ -2,7 +2,7 @@
 
 import { toBs } from "@/lib/dates";
 import type { PatientFilter, PatientRow } from "@/lib/stats";
-import { IconSearch, initialsOf } from "./Icons";
+import { IconEdit, IconSearch, initialsOf } from "./Icons";
 
 interface Props {
   rows: PatientRow[];
@@ -16,6 +16,7 @@ interface Props {
   onFilter: (f: PatientFilter) => void;
   onPage: (p: number) => void;
   onOpen: (row: PatientRow) => void;
+  onEdit: (row: PatientRow) => void;
 }
 
 const FILTERS: { key: PatientFilter; label: string }[] = [
@@ -38,6 +39,7 @@ export function PatientsTable({
   onFilter,
   onPage,
   onOpen,
+  onEdit,
 }: Props) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -90,11 +92,19 @@ export function PatientsTable({
             </div>
           ) : (
             rows.map((r) => (
-              <button
+              <div
                 key={r.id}
-                className="grow"
-                style={{ gridTemplateColumns: COLS }}
+                className="grow row-hover"
+                style={{ gridTemplateColumns: COLS, cursor: "pointer" }}
+                role="button"
+                tabIndex={0}
                 onClick={() => onOpen(r)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpen(r);
+                  }
+                }}
               >
                 <div className="cell-name">
                   <span className="ini">{initialsOf(r.fullName)}</span>
@@ -123,8 +133,18 @@ export function PatientsTable({
                     <span className="pill lg grey">New</span>
                   )}
                 </div>
-                <div className="cell-action">•••</div>
-              </button>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="icon-btn"
+                    style={{ width: "30px", height: "30px" }}
+                    title={`Edit ${r.fullName}`}
+                    aria-label={`Edit ${r.fullName}`}
+                    onClick={() => onEdit(r)}
+                  >
+                    <IconEdit />
+                  </button>
+                </div>
+              </div>
             ))
           )}
         </div>

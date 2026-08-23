@@ -153,6 +153,87 @@ h1 {
   flex-wrap: wrap;
 }
 
+
+/* ---------------------------------------------------------------- */
+/* Dark theme                                                        */
+/*                                                                   */
+/* Only the tokens are redefined — no component knows the theme       */
+/* exists. Steps were chosen for the dark surface rather than         */
+/* algorithmically inverted, so contrast still holds.                 */
+/*                                                                   */
+/* The theme is an explicit choice only. There is deliberately no     */
+/* prefers-color-scheme rule: a lab PC that happens to be set to      */
+/* dark should not silently change how results are read.              */
+/* ---------------------------------------------------------------- */
+
+:root[data-theme="dark"] {
+  --canvas: #0e1117;
+  --surface: #161b24;
+  --border: #262d3a;
+  --divider-head: #222836;
+  --divider-row: #1d232f;
+  --tab-track: #1d232f;
+  --panel-fill: #12171f;
+  --panel-border: #242b38;
+  --hover-row: #1c222d;
+  --border-hover: #39414f;
+
+  --text: #f2f5fa;
+  --text-secondary: #d3d9e3;
+  --text-secondary-2: #bcc4d1;
+  --text-muted: #9aa4b4;
+  --text-faint: #8891a1;
+  --text-faint-2: #7d8797;
+  --text-placeholder: #6f7889;
+
+  --primary: #4d86f7;
+  --primary-hover: #6c9dfa;
+  --primary-tint: #1b2740;
+  --primary-tint-fg: #9dbcfd;
+  --avatar-tint: #222c44;
+  --avatar-tint-fg: #a9bdf8;
+  --bar-idle: #2a3550;
+  --avatar-dark: #3a465c;
+
+  --success-bg: #12301d;
+  --success-fg: #6ee79b;
+  --success-dot: #34d399;
+  --warning-bg: #33260a;
+  --warning-fg: #f5c451;
+  --warning-dot: #f59e0b;
+  --danger-bg: #3a1618;
+  --danger-fg: #f78b8b;
+  --neutral-bg: #232a37;
+  --neutral-fg: #b3bccb;
+
+  --queue-idle: #12171f;
+  --queue-sel: #1a2436;
+  --queue-sel-border: #33507f;
+
+  --shadow-rail: 0 6px 14px rgba(77, 134, 247, 0.35);
+  --shadow-tab: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+/* The printed report is always light: it is ink on paper, and the preview
+   must show exactly what the printer will produce. */
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #39414f;
+}
+
+:root[data-theme="dark"] .scrim {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme="dark"] .menu {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme="dark"] .sheet {
+  background: #fff;
+  color: #000;
+  border-color: #d8dce2;
+}
+
 /* ---------------------------------------------------------------- */
 /* Shell — full bleed, square. No outer frame, no shadow.            */
 /* ---------------------------------------------------------------- */
@@ -697,6 +778,10 @@ kbd {
   color: var(--text);
 }
 
+.row-hover:hover {
+  background: var(--hover-row);
+}
+
 button.grow:hover:not(:disabled) {
   background: var(--hover-row);
   border-color: transparent;
@@ -1174,6 +1259,177 @@ button.grow:hover:not(:disabled) {
 .auth-box {
   width: 100%;
   max-width: 380px;
+}
+
+
+/* ---------------------------------------------------------------- */
+/* Menus, modals, clickable tiles                                    */
+/* ---------------------------------------------------------------- */
+
+button.kpi {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-weight: 400;
+  color: var(--text);
+  cursor: pointer;
+}
+
+button.kpi:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--surface);
+}
+
+.menu-anchor {
+  position: relative;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 210px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-12);
+  padding: var(--s-6);
+  z-index: 60;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+.menu-head {
+  padding: var(--s-8) var(--s-10) var(--s-6);
+  border-bottom: 1px solid var(--divider-row);
+  margin-bottom: var(--s-6);
+}
+
+.menu-name {
+  font-size: var(--t-strong);
+  font-weight: 700;
+}
+
+.menu-role {
+  font-size: var(--t-pill);
+  color: var(--text-faint-2);
+  margin-top: 2px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-10);
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: var(--s-8) var(--s-10);
+  border-radius: var(--r-8);
+  font-size: var(--t-body);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.menu-item:hover:not(:disabled) {
+  background: var(--tab-track);
+}
+
+.menu-item.danger {
+  color: var(--danger-fg);
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  padding: var(--s-16);
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-18);
+  padding: var(--s-24) var(--s-26);
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal.narrow {
+  max-width: 400px;
+}
+
+.modal-title {
+  font-size: var(--t-report);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--s-6);
+}
+
+.modal-body {
+  font-size: var(--t-body);
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin-bottom: var(--s-20);
+}
+
+.modal-actions {
+  display: flex;
+  gap: var(--s-8);
+  justify-content: flex-end;
+  margin-top: var(--s-20);
+  flex-wrap: wrap;
+}
+
+/* Duplicate-match suggestions while registering a patient */
+
+.match-box {
+  border: 1px solid var(--warning-fg);
+  background: var(--warning-bg);
+  border-radius: var(--r-12);
+  padding: var(--s-12) var(--s-14);
+  margin-top: var(--s-8);
+}
+
+.match-title {
+  font-size: var(--t-control);
+  font-weight: 700;
+  color: var(--warning-fg);
+  margin-bottom: var(--s-8);
+}
+
+.match-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-10);
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  padding: var(--s-8) var(--s-10);
+  margin-bottom: var(--s-6);
+  font-weight: 400;
+}
+
+.match-item:last-child {
+  margin-bottom: 0;
+}
+
+.match-reason {
+  font-size: var(--t-pill);
+  color: var(--text-faint-2);
+}
+
+.suggest {
+  border: 1px solid var(--border);
+  border-radius: var(--r-12);
+  background: var(--surface);
+  margin-top: var(--s-6);
+  overflow: hidden;
 }
 
 /* ---------------------------------------------------------------- */

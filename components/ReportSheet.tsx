@@ -4,7 +4,7 @@ import { PANEL_BY_ID } from "@/lib/catalog";
 import type { ComputedMap } from "@/lib/compute";
 import { dualDate } from "@/lib/dates";
 import { flagMarker } from "@/lib/ranges";
-import type { Settings } from "@/lib/storage";
+import type { Organisation } from "@/lib/db";
 import type { Panel, Patient } from "@/lib/types";
 
 interface Props {
@@ -15,7 +15,7 @@ interface Props {
   accession: string;
   sampleDateISO: string;
   reportDateISO: string;
-  settings: Settings;
+  org: Organisation;
 }
 
 /**
@@ -31,20 +31,20 @@ export function ReportSheet({
   accession,
   sampleDateISO,
   reportDateISO,
-  settings,
+  org,
 }: Props) {
   const panels = panelIds
     .map((id) => PANEL_BY_ID.get(id))
     .filter((p): p is Panel => p !== undefined);
 
-  const preprinted = settings.letterheadMode === "preprinted";
+  const preprinted = org.letterhead_mode === "preprinted";
 
   return (
     <div
       className="sheet"
       style={
         {
-          "--print-top-reserve": preprinted ? `${settings.preprintedTopMm}mm` : "0mm",
+          "--print-top-reserve": preprinted ? `${org.preprinted_top_mm}mm` : "0mm",
         } as React.CSSProperties
       }
     >
@@ -54,11 +54,11 @@ export function ReportSheet({
         <div className="lh">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.jpg" alt="" className="lh-logo" />
-          <div className="lh-name">{settings.clinicName}</div>
-          <div className="lh-sub">{settings.clinicAddress}</div>
-          {(settings.clinicPhone || settings.clinicEmail) && (
+          <div className="lh-name">{org.clinic_name}</div>
+          <div className="lh-sub">{org.address}</div>
+          {(org.phone || org.email || org.registration_no) && (
             <div className="lh-sub">
-              {[settings.clinicPhone, settings.clinicEmail].filter(Boolean).join("  ·  ")}
+              {[org.phone, org.email, org.registration_no && `Reg. ${org.registration_no}`].filter(Boolean).join("  ·  ")}
             </div>
           )}
         </div>
@@ -110,11 +110,11 @@ export function ReportSheet({
 
       <div className="sig-block">
         <div className="sig-line">
-          <strong>{settings.verifierName || "________________________"}</strong>
+          <strong>{org.verifier_name || "________________________"}</strong>
           <br />
-          {settings.verifierQualification || "Consultant Pathologist"}
+          {org.verifier_qualification || "Consultant Pathologist"}
           <br />
-          {settings.verifierNmc ? `NMC No. ${settings.verifierNmc}` : "NMC No. ________"}
+          {org.verifier_nmc ? `NMC No. ${org.verifier_nmc}` : "NMC No. ________"}
         </div>
       </div>
 

@@ -7,17 +7,22 @@ import {
   audit,
   createOrder,
   createPatient,
-  findDuplicates,
   getProfile,
+  loadOrganisation,
+  markAwaitingVerification,
   nextAccessionDb,
+  pruneResults,
   recentReports,
   releaseReport,
-  markAwaitingVerification,
+  saveOrganisation,
   saveResults,
   signOut,
+  updateOrderPanels,
+  updatePatient,
+  type Organisation,
   type Profile,
 } from "@/lib/db";
-import { currentBsYear, dualDate, toBs, toTime } from "@/lib/dates";
+import { currentBsYear, toBs, toTime } from "@/lib/dates";
 import { flagMarker, isCritical } from "@/lib/ranges";
 import {
   dashboardStats,
@@ -28,31 +33,27 @@ import {
   type PatientFilter,
   type PatientRow,
 } from "@/lib/stats";
+import { applyTheme, loadTheme, saveTheme, type Theme } from "@/lib/storage";
+import type { Panel, Patient, ReportRecord } from "@/lib/types";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { Dashboard, type OrderTab } from "./Dashboard";
 import {
-  DEFAULT_SETTINGS,
-  loadSettings,
-  saveSettings,
-  type Settings,
-} from "@/lib/storage";
-import type { Panel, Patient, ReportRecord, Sex } from "@/lib/types";
-import { Dashboard } from "./Dashboard";
-import {
-  IconBell,
-  IconExport,
+  IconEdit,
   IconFlask,
   IconGear,
   IconGrid,
   IconList,
   IconLogout,
   IconPrint,
-  IconSearch,
   IconUser,
-  initialsOf,
 } from "./Icons";
 import { Login } from "./Login";
+import { PatientForm, type PatientDraft } from "./PatientForm";
 import { PatientsTable } from "./PatientsTable";
 import { ReportSheet } from "./ReportSheet";
 import { ResultEntry } from "./ResultEntry";
+import { SettingsView } from "./SettingsView";
+import { TopBar } from "./TopBar";
 
 type View =
   | "dashboard"
@@ -66,7 +67,7 @@ type View =
 
 const PAGE_SIZE = 12;
 
-const EMPTY_PATIENT: Omit<Patient, "id" | "mrn"> = {
+const EMPTY_DRAFT: PatientDraft = {
   fullName: "",
   sex: "M",
   ageYears: 0,
@@ -90,15 +91,34 @@ const EMPTY_STATS: DashboardStats = {
   byDepartment: [],
 };
 
+const FALLBACK_ORG: Organisation = {
+  clinic_name: "Tandi Ratnanagar Polyclinic Pvt. Ltd.",
+  address: "Ratnanagar-2, Chitwan, Nepal",
+  phone: "",
+  email: "",
+  registration_no: "",
+  letterhead_mode: "full",
+  preprinted_top_mm: 45,
+  verifier_name: "",
+  verifier_qualification: "",
+  verifier_nmc: "",
+};
+
 export function App() {
   const [booting, setBooting] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [view, setView] = useState<View>("dashboard");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [theme, setTheme] = useState<Theme>("light");
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [editing, setEditing] = useState<Patient | null>(null);
 
   const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [orderTab, setOrderTab] = useState<OrderTab>("All");
+
   const [rows, setRows] = useState<PatientRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -106,11 +126,9 @@ export function App() {
   const [query, setQuery] = useState("");
   const [listLoading, setListLoading] = useState(false);
 
-  const [reports, setReports] = useState<ReportRecord[]>([]);
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [org, setOrg] = useState<Organisation>(FALLBACK_ORG);
 
-  const [draft, setDraft] = useState(EMPTY_PATIENT);
-  const [duplicates, setDuplicates] = useState<Patient[]>([]);
+  const [draft, setDraft] = useState<PatientDraft>(EMPTY_DRAFT);
   const [activePatient, setActivePatient] = useState<Patient | null>(null);
 
   const [panelIds, setPanelIds] = useState<string[]>([]);
@@ -129,7 +147,7 @@ export function App() {
     const [s, a, r] = await Promise.all([
       dashboardStats(),
       recentActivity(),
-      recentReports(20),
+      recentReports(25),
     ]);
     setStats(s);
     setActivity(a);
@@ -149,13 +167,22 @@ export function App() {
     }
   }, [query, filter, page]);
 
+  const bootstrap = useCallback(async () => {
+    const p = await getProfile();
+    setProfile(p);
+    if (!p) return;
+    const o = await loadOrganisation();
+    if (o) setOrg(o);
+    await refreshOverview();
+  }, [refreshOverview]);
+
   useEffect(() => {
+    const t = loadTheme();
+    setTheme(t);
+    applyTheme(t);
     (async () => {
       try {
-        const p = await getProfile();
-        setProfile(p);
-        setSettings(loadSettings());
-        if (p) await refreshOverview();
+        await bootstrap();
       } catch (e) {
         fail(e);
       } finally {
@@ -171,17 +198,14 @@ export function App() {
     return () => clearTimeout(t);
   }, [profile, refreshList]);
 
-  useEffect(() => {
-    saveSettings(settings);
-  }, [settings]);
-
-  useEffect(() => {
-    if (view !== "newPatient") return;
-    const t = setTimeout(() => {
-      findDuplicates(draft.fullName).then(setDuplicates).catch(() => undefined);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [draft.fullName, view]);
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next: Theme = prev === "dark" ? "light" : "dark";
+      applyTheme(next);
+      saveTheme(next);
+      return next;
+    });
+  }, []);
 
   const selectedPanels = useMemo(
     () =>
@@ -214,6 +238,7 @@ export function App() {
     setValues({});
     setComments({});
     setOrderId("");
+    setAccession("");
     setReleasedVersion(0);
     setCriticalAcknowledged(false);
     setSampleDateISO(new Date().toISOString());
@@ -221,27 +246,31 @@ export function App() {
     setView("order");
   }, []);
 
-  const openRow = useCallback(
-    (r: PatientRow) =>
-      beginOrder({
-        id: r.id,
-        mrn: r.mrn,
-        fullName: r.fullName,
-        sex: r.sex,
-        ageYears: r.ageYears,
-        phone: r.phone,
-        referredBy: r.referredBy,
-      }),
-    [beginOrder],
-  );
+  const rowToPatient = (r: PatientRow): Patient => ({
+    id: r.id,
+    mrn: r.mrn,
+    fullName: r.fullName,
+    sex: r.sex,
+    ageYears: r.ageYears,
+    phone: r.phone,
+    address: r.address,
+    referredBy: r.referredBy,
+  });
 
-  const savePatientAndOrder = useCallback(async () => {
+  const savePatient = useCallback(async () => {
     if (!profile) return;
     setBusy(true);
     try {
-      const saved = await createPatient(draft, profile.id);
-      await Promise.all([refreshOverview(), refreshList()]);
-      beginOrder(saved);
+      if (draft.id) {
+        const saved = await updatePatient(draft as Patient, profile.id);
+        setActivePatient((cur) => (cur && cur.id === saved.id ? saved : cur));
+        await Promise.all([refreshOverview(), refreshList()]);
+        setEditing(null);
+      } else {
+        const saved = await createPatient(draft, profile.id);
+        await Promise.all([refreshOverview(), refreshList()]);
+        beginOrder(saved);
+      }
     } catch (e) {
       fail(e);
     } finally {
@@ -249,21 +278,41 @@ export function App() {
     }
   }, [draft, profile, refreshOverview, refreshList, beginOrder]);
 
+  /**
+   * Creates the order the first time, and only updates it thereafter.
+   *
+   * This previously created a fresh order on every visit to the screen, so
+   * stepping back to change the test selection left empty duplicate orders
+   * scattered under the same patient.
+   */
   const startEntry = useCallback(async () => {
     if (!profile || !activePatient) return;
     setBusy(true);
     try {
-      const acc = await nextAccessionDb(currentBsYear());
-      const id = await createOrder(activePatient.id, panelIds, acc, profile.id);
-      setAccession(acc);
-      setOrderId(id);
+      if (orderId) {
+        await updateOrderPanels(orderId, panelIds);
+        await pruneResults(orderId, panelIds);
+        setValues((prev) => {
+          const kept: Record<string, string> = {};
+          for (const [analyteId, v] of Object.entries(prev)) {
+            const panel = PANEL_OF_ANALYTE.get(analyteId);
+            if (panel && panelIds.includes(panel)) kept[analyteId] = v;
+          }
+          return kept;
+        });
+      } else {
+        const acc = await nextAccessionDb(currentBsYear());
+        const id = await createOrder(activePatient.id, panelIds, acc, profile.id);
+        setAccession(acc);
+        setOrderId(id);
+      }
       setView("entry");
     } catch (e) {
       fail(e);
     } finally {
       setBusy(false);
     }
-  }, [profile, activePatient, panelIds]);
+  }, [profile, activePatient, panelIds, orderId]);
 
   const goToPreview = useCallback(async () => {
     if (!profile || !orderId) return;
@@ -289,11 +338,11 @@ export function App() {
         values,
         comments,
         {
-          name: settings.verifierName,
-          qualification: settings.verifierQualification,
-          nmc: settings.verifierNmc,
+          name: org.verifier_name,
+          qualification: org.verifier_qualification,
+          nmc: org.verifier_nmc,
         },
-        settings.letterheadMode,
+        org.letterhead_mode,
         profile.id,
       );
       setReleasedVersion(v);
@@ -304,7 +353,7 @@ export function App() {
     } finally {
       setBusy(false);
     }
-  }, [profile, orderId, values, comments, settings, refreshOverview, refreshList]);
+  }, [profile, orderId, values, comments, org, refreshOverview, refreshList]);
 
   const openReport = useCallback(
     async (record: ReportRecord, goTo: View = "reports") => {
@@ -323,12 +372,47 @@ export function App() {
     [profile],
   );
 
+  const saveOrg = useCallback(async () => {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      await saveOrganisation(org, profile.id);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }, [org, profile]);
+
+  const goNewPatient = useCallback(() => {
+    setDraft(EMPTY_DRAFT);
+    setError("");
+    setView("newPatient");
+  }, []);
+
+  /** The KPI tiles are shortcuts into the worklist, not decoration. */
+  const openKpi = useCallback((which: OrderTab | "patients") => {
+    if (which === "patients") {
+      setFilter("all");
+      setPage(0);
+      setView("patients");
+      return;
+    }
+    setOrderTab(which);
+    setView("dashboard");
+  }, []);
+
+  const startEdit = useCallback((p: Patient) => {
+    setEditing(p);
+    setDraft({ ...p });
+  }, []);
+
   /* ---------------------------------------------------------------- */
 
   if (booting) {
     return (
       <div className="auth-page">
-        <p className="card-sub">Loading…</p>
+        <p style={{ color: "var(--text-muted)" }}>Loading…</p>
       </div>
     );
   }
@@ -339,9 +423,7 @@ export function App() {
         onSignedIn={async () => {
           setBooting(true);
           try {
-            const p = await getProfile();
-            setProfile(p);
-            if (p) await refreshOverview();
+            await bootstrap();
           } catch (e) {
             fail(e);
           } finally {
@@ -359,349 +441,259 @@ export function App() {
       } / ${activePatient.ageYears} yrs`
     : "";
 
-  /** Exports the current page of patients. Deliberately client-side: it only
-   *  contains what the technician can already see on screen, and it is logged. */
-  const exportCsv = () => {
-    const CRLF = String.fromCharCode(13, 10);
-    const header = ["MRN", "Name", "Sex", "Age", "Phone", "Address", "Referred by", "Visits"];
-    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const body = rows.map((r) =>
-      [r.mrn, r.fullName, r.sex, String(r.ageYears), r.phone, r.address, r.referredBy, String(r.visitCount)]
-        .map(esc)
-        .join(","),
-    );
-    const blob = new Blob([[header.map(esc).join(","), ...body].join(CRLF)], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `trp-patients-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    if (profile) void audit(profile.id, "patient.export", "patient", undefined, { rows: rows.length });
-  };
-
-  const goNewPatient = () => {
-    setDraft(EMPTY_PATIENT);
-    setDuplicates([]);
-    setError("");
-    setView("newPatient");
-  };
-
   return (
     <div className="wrap">
-        <header className="topbar no-print">
-          <div className="brand-chip">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/trp-logo.png" alt="" className="brand-logo" />
-            <div>
-              <div className="brand-name">TRP POLYCLINIC</div>
-              <div className="brand-sub">Tandi Ratnanagar · Pathology</div>
+      <TopBar
+        profile={profile}
+        query={query}
+        onQuery={(q) => {
+          setQuery(q);
+          setPage(0);
+          setView("patients");
+        }}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onNewPatient={goNewPatient}
+        onNewOrder={() => setView("patients")}
+        onSettings={() => setView("settings")}
+        onSignOut={() => setConfirmSignOut(true)}
+      />
+
+      <div className="body-split">
+        <nav className="rail no-print" aria-label="Main">
+          <button
+            className={`rail-btn ${view === "dashboard" ? "active" : ""}`}
+            onClick={() => setView("dashboard")}
+            title="Dashboard"
+            aria-label="Dashboard"
+            aria-current={view === "dashboard" ? "page" : undefined}
+          >
+            <IconGrid />
+          </button>
+          <button
+            className={`rail-btn ${view === "patients" ? "active" : ""}`}
+            onClick={() => setView("patients")}
+            title="Patients"
+            aria-label="Patients"
+            aria-current={view === "patients" ? "page" : undefined}
+          >
+            <IconUser />
+          </button>
+          <button
+            className={`rail-btn ${view === "reports" ? "active" : ""}`}
+            onClick={() => setView("reports")}
+            title="Reports"
+            aria-label="Reports"
+            aria-current={view === "reports" ? "page" : undefined}
+          >
+            <IconFlask />
+          </button>
+          <button className="rail-btn" disabled title="Billing — not built yet">
+            <IconList />
+          </button>
+          <button
+            className={`rail-btn ${view === "settings" ? "active" : ""}`}
+            onClick={() => setView("settings")}
+            title="Settings"
+            aria-label="Settings"
+            aria-current={view === "settings" ? "page" : undefined}
+          >
+            <IconGear />
+          </button>
+          <button
+            className="rail-btn pushdown"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={() => setConfirmSignOut(true)}
+          >
+            <IconLogout />
+          </button>
+        </nav>
+
+        <div className="col">
+          {error && (
+            <div className="banner no-print" role="alert">
+              <strong>{error}</strong>
+              <button style={{ marginLeft: "var(--s-14)" }} onClick={() => setError("")}>
+                Dismiss
+              </button>
             </div>
-          </div>
+          )}
 
-          <div className="searchbar">
-            <IconSearch />
-            <input
-              placeholder="Search patients, MRN or report ID"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setPage(0);
-                setView("patients");
-              }}
-              aria-label="Search patients"
-            />
-          </div>
+          {view === "dashboard" && (
+            <div className="no-print">
+              <Dashboard
+                stats={stats}
+                activity={activity}
+                orders={reports}
+                tab={orderTab}
+                onTab={setOrderTab}
+                onOpenOrder={(r) => openReport(r, "reports")}
+                onNewOrder={() => setView("patients")}
+                onViewAll={() => setView("reports")}
+                onOpenKpi={openKpi}
+              />
+            </div>
+          )}
 
-          <div className="topbar-right">
-            <button onClick={goNewPatient}>+ Patient</button>
-            <button onClick={() => setView("patients")}>+ Lab order</button>
-            <button
-              disabled
-              title="Billing is not built yet"
-              aria-label="New invoice — billing is not built yet"
-            >
-              + Invoice
-            </button>
-            <button className="icon-btn" disabled title="Notifications — not built yet">
-              <IconBell />
-            </button>
-            <button
-              className="icon-btn"
-              title="Settings"
-              aria-label="Settings"
-              onClick={() => setView("settings")}
-            >
-              <IconGear size={17} />
-            </button>
-            <button
-              className="avatar"
-              title={`${profile.full_name} — sign out`}
-              aria-label={`${profile.full_name}, sign out`}
-              onClick={async () => {
-                await signOut();
-                setProfile(null);
-              }}
-            >
-              {initialsOf(profile.full_name)}
-            </button>
-          </div>
-        </header>
-
-        <div className="body-split">
-          <nav className="rail no-print" aria-label="Main">
-            <button
-              className={`rail-btn ${view === "dashboard" ? "active" : ""}`}
-              onClick={() => setView("dashboard")}
-              title="Dashboard"
-              aria-label="Dashboard"
-              aria-current={view === "dashboard" ? "page" : undefined}
-            >
-              <IconGrid />
-            </button>
-            <button
-              className={`rail-btn ${view === "patients" ? "active" : ""}`}
-              onClick={() => setView("patients")}
-              title="Patients"
-              aria-label="Patients"
-              aria-current={view === "patients" ? "page" : undefined}
-            >
-              <IconUser />
-            </button>
-            <button
-              className={`rail-btn ${view === "reports" ? "active" : ""}`}
-              onClick={() => setView("reports")}
-              title="Reports"
-              aria-label="Reports"
-              aria-current={view === "reports" ? "page" : undefined}
-            >
-              <IconFlask />
-            </button>
-            <button
-              className="rail-btn"
-              disabled
-              title="Billing — not built yet"
-              aria-label="Billing — not built yet"
-            >
-              <IconList />
-            </button>
-            <button
-              className={`rail-btn ${view === "settings" ? "active" : ""}`}
-              onClick={() => setView("settings")}
-              title="Settings"
-              aria-label="Settings"
-              aria-current={view === "settings" ? "page" : undefined}
-            >
-              <IconGear />
-            </button>
-            <button
-              className="rail-btn pushdown"
-              title="Sign out"
-              aria-label="Sign out"
-              onClick={async () => {
-                await signOut();
-                setProfile(null);
-              }}
-            >
-              <IconLogout />
-            </button>
-          </nav>
-
-          <div className="work">
-            {error && (
-              <div className="banner no-print" role="alert">
-                <strong>{error}</strong>
-                <button
-                  className="ghost"
-                  style={{ marginLeft: "var(--s-14)" }}
-                  onClick={() => setError("")}
-                >
-                  Dismiss
+          {view === "patients" && (
+            <div className="no-print">
+              <div className="page-head">
+                <div>
+                  <h1>Patients</h1>
+                  <div className="page-sub">
+                    {stats.totalPatients.toLocaleString()} registered ·{" "}
+                    {stats.newThisWeek} new this week
+                  </div>
+                </div>
+                <div className="spacer" />
+                <button className="primary" onClick={goNewPatient}>
+                  + New patient
                 </button>
               </div>
-            )}
+              <PatientsTable
+                rows={rows}
+                total={total}
+                page={page}
+                pageSize={PAGE_SIZE}
+                filter={filter}
+                query={query}
+                loading={listLoading}
+                onQuery={(q) => {
+                  setQuery(q);
+                  setPage(0);
+                }}
+                onFilter={(f) => {
+                  setFilter(f);
+                  setPage(0);
+                }}
+                onPage={setPage}
+                onOpen={(r) => beginOrder(rowToPatient(r))}
+                onEdit={(r) => startEdit(rowToPatient(r))}
+              />
+            </div>
+          )}
 
-            {view === "dashboard" && (
-              <div className="no-print">
-                <Dashboard
-                  stats={stats}
-                  activity={activity}
-                  orders={reports}
-                  onOpenOrder={(r) => openReport(r, "reports")}
-                  onNewOrder={() => setView("patients")}
-                  onViewAll={() => setView("reports")}
-                />
-              </div>
-            )}
-
-            {view === "patients" && (
-              <div className="no-print">
-                <div className="page-head">
-                  <div>
-                    <h1>Patients</h1>
-                    <div className="page-sub">
-                      {stats.totalPatients.toLocaleString()} registered ·{" "}
-                      {stats.newThisWeek} new this week
-                    </div>
-                  </div>
-                  <div className="spacer" />
-                  <button onClick={exportCsv} disabled={rows.length === 0}>
-                    <IconExport /> Export CSV
-                  </button>
-                  <button className="primary" onClick={goNewPatient}>
-                    + New patient
-                  </button>
-                </div>
-                <PatientsTable
-                  rows={rows}
-                  total={total}
-                  page={page}
-                  pageSize={PAGE_SIZE}
-                  filter={filter}
-                  query={query}
-                  loading={listLoading}
-                  onQuery={(q) => {
-                    setQuery(q);
-                    setPage(0);
-                  }}
-                  onFilter={(f) => {
-                    setFilter(f);
-                    setPage(0);
-                  }}
-                  onPage={setPage}
-                  onOpen={openRow}
-                />
-              </div>
-            )}
-
-            {view === "reports" && (
-              <div className="no-print">
-                <div className="page-head">
-                  <div>
-                    <h1>Reports</h1>
-                    <div className="page-sub">
-                      {stats.awaitingVerification} awaiting verification ·{" "}
-                      {stats.releasedToday} released today
-                    </div>
+          {view === "reports" && (
+            <div className="no-print">
+              <div className="page-head">
+                <div>
+                  <h1>Reports</h1>
+                  <div className="page-sub">
+                    {stats.awaitingVerification} awaiting verification ·{" "}
+                    {stats.releasedToday} released today
                   </div>
                 </div>
+              </div>
 
-                <div className="verify-split">
-                  <div className="card pad">
-                    <div
-                      className="card-title"
-                      style={{ fontSize: "var(--t-card)", margin: "4px 4px 12px" }}
-                    >
-                      Verification queue
-                    </div>
-                    {reports.length === 0 ? (
-                      <div className="empty">Nothing in the queue.</div>
-                    ) : (
-                      reports.map((r) => (
-                        <button
-                          key={r.id}
-                          className={`queue-item ${orderId === r.id ? "on" : ""}`}
-                          onClick={() => openReport(r)}
-                        >
-                          <div className="row" style={{ gap: "var(--s-8)" }}>
-                            <span className="queue-name">
-                              {r.patientSnapshot.fullName}
-                            </span>
-                            <div className="spacer" />
-                            <span
-                              className={`chip ${r.status === "released" ? "good" : "warn"}`}
-                            >
-                              {r.status === "released" ? "Released" : "Pending"}
-                            </span>
-                          </div>
-                          <div className="queue-test">
-                            {r.panelIds
-                              .map((id) => PANEL_BY_ID.get(id)?.title ?? id)
-                              .join(", ")}
-                          </div>
-                          <div className="queue-meta">
-                            {r.accession} · {toBs(r.sampleDateISO)} BS ·{" "}
-                            {toTime(r.sampleDateISO)}
-                          </div>
-                        </button>
-                      ))
-                    )}
+              <div className="verify-split">
+                <div className="card pad">
+                  <div
+                    className="card-title"
+                    style={{ fontSize: "var(--t-panel)", margin: "4px 4px 12px" }}
+                  >
+                    Verification queue
                   </div>
-
-                  {activePatient && orderId ? (
-                    <div className="card" style={{ padding: "var(--s-24) var(--s-26)" }}>
-                      <div
-                        className="row"
-                        style={{
-                          alignItems: "flex-start",
-                          paddingBottom: "var(--s-18)",
-                          borderBottom: "1px solid var(--divider-head)",
-                        }}
+                  {reports.length === 0 ? (
+                    <div className="empty">Nothing in the queue.</div>
+                  ) : (
+                    reports.map((r) => (
+                      <button
+                        key={r.id}
+                        className={`queue-item ${orderId === r.id ? "on" : ""}`}
+                        onClick={() => openReport(r)}
                       >
-                        <div>
-                          <div className="report-title">{activePatient.fullName}</div>
-                          <div className="report-meta">
-                            {selectedPanels.map((p) => p.title).join(", ")} ·{" "}
-                            {selectedPanels[0]?.department ?? "—"} · Report #
-                            {accession}
-                          </div>
-                        </div>
-                        <div className="spacer" />
-                        <button onClick={() => setView("preview")}>
-                          <IconPrint /> Print
-                        </button>
-                        {releasedVersion > 0 ? (
-                          <span className="pill green">Released v{releasedVersion}</span>
-                        ) : canRelease ? (
-                          <button
-                            className="primary"
-                            disabled={busy}
-                            onClick={doRelease}
+                        <div className="row" style={{ gap: "var(--s-8)" }}>
+                          <span className="queue-name">{r.patientSnapshot.fullName}</span>
+                          <div className="spacer" />
+                          <span
+                            className={`pill ${r.status === "released" ? "green" : "amber"}`}
                           >
-                            {busy ? "Releasing…" : "Verify & release"}
-                          </button>
-                        ) : (
-                          <span className="pill amber">Verifier must release</span>
-                        )}
-                      </div>
+                            {r.status === "released" ? "Released" : "Pending"}
+                          </span>
+                        </div>
+                        <div className="queue-test">
+                          {r.panelIds
+                            .map((id) => PANEL_BY_ID.get(id)?.title ?? id)
+                            .join(", ")}
+                        </div>
+                        <div className="queue-meta">
+                          {r.accession} · {toBs(r.sampleDateISO)} BS ·{" "}
+                          {toTime(r.sampleDateISO)}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
 
-                      <div className="meta-grid">
-                        <div>
-                          <div className="meta-k">MRN</div>
-                          <div className="meta-v">{activePatient.mrn}</div>
-                        </div>
-                        <div>
-                          <div className="meta-k">Accession</div>
-                          <div className="meta-v">{accession}</div>
-                        </div>
-                        <div>
-                          <div className="meta-k">Collected</div>
-                          <div className="meta-v">
-                            {toBs(sampleDateISO)} BS · {toTime(sampleDateISO)}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="meta-k">Referred by</div>
-                          <div className="meta-v">
-                            {activePatient.referredBy || "—"}
-                          </div>
+                {activePatient && orderId ? (
+                  <div className="card" style={{ padding: "var(--s-24) var(--s-26)" }}>
+                    <div
+                      className="row"
+                      style={{
+                        alignItems: "flex-start",
+                        paddingBottom: "var(--s-18)",
+                        borderBottom: "1px solid var(--divider-head)",
+                      }}
+                    >
+                      <div>
+                        <div className="report-title">{activePatient.fullName}</div>
+                        <div className="report-meta">
+                          {selectedPanels.map((p) => p.title).join(", ")} ·{" "}
+                          {selectedPanels[0]?.department ?? "—"} · Report #{accession}
                         </div>
                       </div>
+                      <div className="spacer" />
+                      <button onClick={() => setView("preview")}>
+                        <IconPrint /> Print
+                      </button>
+                      {releasedVersion > 0 ? (
+                        <span className="pill green">Released v{releasedVersion}</span>
+                      ) : canRelease ? (
+                        <button className="primary" disabled={busy} onClick={doRelease}>
+                          {busy ? "Releasing…" : "Verify & release"}
+                        </button>
+                      ) : (
+                        <span className="pill amber">Verifier must release</span>
+                      )}
+                    </div>
 
-                      <div className="result-panel">
-                        <div
-                          className="ghead"
-                          style={{ gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr" }}
-                        >
-                          <div>Analyte</div>
-                          <div>Result</div>
-                          <div>Unit</div>
-                          <div>Reference range</div>
-                          <div>Flag</div>
+                    <div className="meta-grid">
+                      <div>
+                        <div className="meta-k">MRN</div>
+                        <div className="meta-v">{activePatient.mrn}</div>
+                      </div>
+                      <div>
+                        <div className="meta-k">Accession</div>
+                        <div className="meta-v">{accession}</div>
+                      </div>
+                      <div>
+                        <div className="meta-k">Collected</div>
+                        <div className="meta-v">
+                          {toBs(sampleDateISO)} BS · {toTime(sampleDateISO)}
                         </div>
-                        {[...computed.values()]
+                      </div>
+                      <div>
+                        <div className="meta-k">Referred by</div>
+                        <div className="meta-v">{activePatient.referredBy || "—"}</div>
+                      </div>
+                    </div>
+
+                    <div className="result-panel">
+                      <div
+                        className="ghead"
+                        style={{ gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr" }}
+                      >
+                        <div>Analyte</div>
+                        <div>Result</div>
+                        <div>Unit</div>
+                        <div>Reference range</div>
+                        <div>Flag</div>
+                      </div>
+                      {[...computed.values()].filter((c) => c.display !== "").length === 0 ? (
+                        <div className="empty">No results entered for this order yet.</div>
+                      ) : (
+                        [...computed.values()]
                           .filter((c) => c.display !== "")
                           .map((c) => {
                             const marker = flagMarker(c.flag);
@@ -710,9 +702,14 @@ export function App() {
                               <div
                                 key={c.analyte.id}
                                 className="grow"
-                                style={{ gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr" }}
+                                style={{
+                                  gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr",
+                                }}
                               >
-                                <div className="cell-dim" style={{ color: "var(--text-secondary)" }}>
+                                <div
+                                  className="cell-dim"
+                                  style={{ color: "var(--text-secondary)" }}
+                                >
                                   {c.analyte.name}
                                 </div>
                                 <div
@@ -734,11 +731,7 @@ export function App() {
                                 <div>
                                   <span
                                     className={`pill ${
-                                      marker === "H"
-                                        ? "red"
-                                        : marker === "L"
-                                          ? "amber"
-                                          : "green"
+                                      marker === "H" ? "red" : marker === "L" ? "amber" : "green"
                                     }`}
                                   >
                                     {isCritical(c.flag)
@@ -754,508 +747,349 @@ export function App() {
                                 </div>
                               </div>
                             );
-                          })}
-                      </div>
+                          })
+                      )}
+                    </div>
 
-                      <div className="note-row">
-                        <div className="note-box">
-                          <div className="note-k">Comment</div>
-                          <div style={{ fontSize: "var(--t-body)", lineHeight: 1.55 }}>
-                            {Object.values(comments).filter(Boolean).join(" ") ||
-                              "No comment recorded."}
-                          </div>
-                        </div>
-                        <div className="note-box narrow">
-                          <div className="note-k">Signed by</div>
-                          <div style={{ fontSize: "var(--t-strong)", fontWeight: 700 }}>
-                            {settings.verifierName || "Not set"}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-muted)",
-                              marginTop: "3px",
-                            }}
-                          >
-                            {settings.verifierQualification || "—"}
-                            {settings.verifierNmc ? ` · NMC ${settings.verifierNmc}` : ""}
-                          </div>
+                    <div className="note-row">
+                      <div className="note-box">
+                        <div className="note-k">Comment</div>
+                        <div className="note-body">
+                          {Object.values(comments).filter(Boolean).join(" ") ||
+                            "No comment recorded."}
                         </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="card">
-                      <div className="empty">
-                        Select a report from the queue to review it.
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {view === "newPatient" && (
-              <div className="no-print">
-                <div className="page-head">
-                  <div>
-                    <h1>New patient</h1>
-                    <div className="page-sub">
-                      A registration number is assigned automatically
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card" style={{ maxWidth: "780px" }}>
-                  <div className="field">
-                    <label htmlFor="pname">Full name</label>
-                    <input
-                      id="pname"
-                      autoFocus
-                      value={draft.fullName}
-                      onChange={(e) => setDraft({ ...draft, fullName: e.target.value })}
-                    />
-                    {duplicates.length > 0 && (
-                      <p style={{ color: "var(--warning-fg)", fontSize: "var(--t-control)" }}>
-                        {duplicates.length} existing patient
-                        {duplicates.length > 1 ? "s" : ""} with this name (
-                        {duplicates.map((d) => `MRN ${d.mrn}, ${d.ageYears}y`).join("; ")}
-                        ). Check before continuing.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid cols-3">
-                    <div className="field">
-                      <label htmlFor="psex">Sex</label>
-                      <select
-                        id="psex"
-                        value={draft.sex}
-                        onChange={(e) =>
-                          setDraft({ ...draft, sex: e.target.value as Sex })
-                        }
-                      >
-                        <option value="M">Male</option>
-                        <option value="F">Female</option>
-                        <option value="O">Other</option>
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label htmlFor="page">Age (years)</label>
-                      <input
-                        id="page"
-                        inputMode="numeric"
-                        value={draft.ageYears === 0 ? "" : draft.ageYears}
-                        onChange={(e) =>
-                          setDraft({ ...draft, ageYears: Number(e.target.value) || 0 })
-                        }
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="pphone">Phone</label>
-                      <input
-                        id="pphone"
-                        value={draft.phone ?? ""}
-                        onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid cols-2">
-                    <div className="field">
-                      <label htmlFor="paddr">Address</label>
-                      <input
-                        id="paddr"
-                        placeholder="Ratnanagar-2, Chitwan"
-                        value={draft.address ?? ""}
-                        onChange={(e) => setDraft({ ...draft, address: e.target.value })}
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="pref">Referred by</label>
-                      <input
-                        id="pref"
-                        placeholder="Dr. …"
-                        value={draft.referredBy ?? ""}
-                        onChange={(e) =>
-                          setDraft({ ...draft, referredBy: e.target.value })
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <button onClick={() => setView("patients")}>Cancel</button>
-                    <div className="spacer" />
-                    <button
-                      className="primary"
-                      disabled={
-                        busy || draft.fullName.trim() === "" || draft.ageYears <= 0
-                      }
-                      onClick={savePatientAndOrder}
-                    >
-                      {busy ? "Saving…" : "Save & choose tests →"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {view === "order" && activePatient && (
-              <div className="no-print">
-                <div className="page-head">
-                  <div>
-                    <h1>Choose tests</h1>
-                    <div className="page-sub">{patientLine}</div>
-                  </div>
-                </div>
-
-                <div className="grid cols-2">
-                  {PANELS.map((panel) => {
-                    const on = panelIds.includes(panel.id);
-                    return (
-                      <button
-                        key={panel.id}
-                        onClick={() =>
-                          setPanelIds((prev) =>
-                            prev.includes(panel.id)
-                              ? prev.filter((x) => x !== panel.id)
-                              : [...prev, panel.id],
-                          )
-                        }
-                        aria-pressed={on}
-                        style={{
-                          display: "block",
-                          textAlign: "left",
-                          padding: "var(--s-18)",
-                          borderRadius: "var(--r-16)",
-                          borderColor: on ? "var(--primary)" : "var(--border)",
-                          background: on ? "var(--primary-tint)" : "var(--surface)",
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, fontSize: "var(--t-strong)" }}>
-                          {on ? "☑" : "☐"} {panel.title}
+                      <div className="note-box narrow">
+                        <div className="note-k">Signed by</div>
+                        <div style={{ fontSize: "var(--t-strong)", fontWeight: 700 }}>
+                          {org.verifier_name || "Not set"}
                         </div>
                         <div
                           style={{
-                            color: "var(--text-faint)",
-                            fontSize: "var(--t-control)",
+                            fontSize: "var(--t-caption)",
+                            color: "var(--text-faint-2)",
                             marginTop: "3px",
                           }}
                         >
-                          {panel.department}
+                          {org.verifier_qualification || "—"}
+                          {org.verifier_nmc ? ` · NMC ${org.verifier_nmc}` : ""}
                         </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="toolbar">
-                  <button onClick={() => setView("patients")}>← Back</button>
-                  <div className="spacer" />
-                  <span className="card-sub">{panelIds.length} selected</span>
-                  <button
-                    className="primary"
-                    disabled={busy || panelIds.length === 0}
-                    onClick={startEntry}
-                  >
-                    {busy ? "Creating order…" : "Enter results →"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {view === "entry" && activePatient && (
-              <div className="no-print">
-                <div className="page-head">
-                  <div>
-                    <h1>Enter results</h1>
-                    <div className="page-sub">
-                      {patientLine} · {accession} · Sample {toBs(sampleDateISO)} BS
-                    </div>
-                  </div>
-                </div>
-
-                {criticals.length > 0 && (
-                  <div className="banner">
-                    <strong>
-                      {criticals.length} critical value
-                      {criticals.length > 1 ? "s" : ""} detected.
-                    </strong>
-                    <ul style={{ margin: "var(--s-10) 0" }}>
-                      {criticals.map((c) => (
-                        <li key={c.analyte.id}>
-                          {c.analyte.name}: {c.display} {c.analyte.unit ?? ""}
-                        </li>
-                      ))}
-                    </ul>
-                    <label
-                      style={{
-                        fontSize: "var(--t-body)",
-                        display: "flex",
-                        gap: "var(--s-10)",
-                        alignItems: "center",
-                        marginBottom: 0,
-                        color: "var(--text)",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={criticalAcknowledged}
-                        onChange={(e) => setCriticalAcknowledged(e.target.checked)}
-                        style={{ width: "auto" }}
-                      />
-                      I confirm these results have been re-checked.
-                    </label>
-                  </div>
-                )}
-
-                <div className="notice">
-                  <kbd>Enter</kbd> or <kbd>↓</kbd> moves to the next test. Greyed rows
-                  are calculated automatically and cannot be typed into.
-                </div>
-
-                <ResultEntry
-                  patient={activePatient}
-                  panelIds={panelIds}
-                  values={values}
-                  comments={comments}
-                  computed={computed}
-                  onChange={(id, v) => setValues((prev) => ({ ...prev, [id]: v }))}
-                  onCommentChange={(id, v) =>
-                    setComments((prev) => ({ ...prev, [id]: v }))
-                  }
-                />
-
-                <div className="toolbar">
-                  <button onClick={() => setView("order")}>← Tests</button>
-                  <div className="spacer" />
-                  <span className="card-sub">
-                    {progress.entered} of {progress.total} entered
-                  </span>
-                  <button
-                    className="primary"
-                    disabled={busy || (criticals.length > 0 && !criticalAcknowledged)}
-                    onClick={goToPreview}
-                  >
-                    {busy ? "Saving…" : "Save & preview →"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {view === "preview" && activePatient && (
-              <>
-                <div className="no-print">
-                  <div className="page-head">
-                    <div>
-                      <h1>Report preview</h1>
-                      <div className="page-sub">
-                        {patientLine} · {accession}
                       </div>
                     </div>
-                    <div className="spacer" />
-                    <button onClick={() => setView("entry")}>← Edit results</button>
-                    <button
-                      onClick={() =>
-                        setSettings({
-                          ...settings,
-                          letterheadMode:
-                            settings.letterheadMode === "full" ? "preprinted" : "full",
-                        })
-                      }
-                    >
-                      {settings.letterheadMode === "full"
-                        ? "Letterhead: app-printed"
-                        : "Letterhead: preprinted"}
-                    </button>
-                    {releasedVersion > 0 ? (
-                      <>
-                        <span className="pill green">Released v{releasedVersion}</span>
-                        <button className="primary" onClick={() => window.print()}>
-                          <IconPrint /> Reprint
-                        </button>
-                      </>
-                    ) : canRelease ? (
-                      <button className="primary" disabled={busy} onClick={doRelease}>
-                        {busy ? "Releasing…" : "Verify & release"}
-                      </button>
-                    ) : (
-                      <span className="pill amber">A verifier must release this</span>
-                    )}
                   </div>
-                </div>
+                ) : (
+                  <div className="card pad">
+                    <div className="empty">Select a report from the queue to review it.</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-                <div id="print-root">
-                  <ReportSheet
-                    patient={activePatient}
-                    panelIds={panelIds}
-                    computed={computed}
-                    comments={comments}
-                    accession={accession}
-                    sampleDateISO={sampleDateISO}
-                    reportDateISO={new Date().toISOString()}
-                    settings={settings}
-                  />
-                </div>
-              </>
-            )}
-
-            {view === "settings" && (
-              <div className="no-print">
-                <div className="page-head">
-                  <div>
-                    <h1>Settings</h1>
-                    <div className="page-sub">
-                      Signed in as {profile.full_name} ({profile.role}
-                      {canRelease ? ", can release reports" : ""}) ·{" "}
-                      {dualDate(new Date().toISOString())}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="notice">
-                  Clinic, letterhead and verifier details are stored in this browser,
-                  so each computer needs them set once. Moving them into the database
-                  is a later phase.
-                </div>
-
-                <div className="card">
-                  <div className="card-head" style={{ marginBottom: "var(--s-14)" }}>
-                    <span className="card-title">Clinic</span>
-                  </div>
-                  <div className="field">
-                    <label htmlFor="cname">Clinic name</label>
-                    <input
-                      id="cname"
-                      value={settings.clinicName}
-                      onChange={(e) =>
-                        setSettings({ ...settings, clinicName: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="grid cols-3">
-                    <div className="field">
-                      <label htmlFor="caddr">Address</label>
-                      <input
-                        id="caddr"
-                        value={settings.clinicAddress}
-                        onChange={(e) =>
-                          setSettings({ ...settings, clinicAddress: e.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="cphone">Phone</label>
-                      <input
-                        id="cphone"
-                        value={settings.clinicPhone}
-                        onChange={(e) =>
-                          setSettings({ ...settings, clinicPhone: e.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="cemail">Email</label>
-                      <input
-                        id="cemail"
-                        value={settings.clinicEmail}
-                        onChange={(e) =>
-                          setSettings({ ...settings, clinicEmail: e.target.value })
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="card-head" style={{ marginBottom: "var(--s-14)" }}>
-                    <span className="card-title">Letterhead</span>
-                  </div>
-                  <div className="grid cols-2">
-                    <div className="field">
-                      <label htmlFor="lhmode">Mode</label>
-                      <select
-                        id="lhmode"
-                        value={settings.letterheadMode}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            letterheadMode:
-                              e.target.value === "full" ? "full" : "preprinted",
-                          })
-                        }
-                      >
-                        <option value="full">App prints the letterhead (blank A4)</option>
-                        <option value="preprinted">
-                          Preprinted stationery (leave top blank)
-                        </option>
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label htmlFor="lhtop">
-                        Top reserve for preprinted paper (mm)
-                      </label>
-                      <input
-                        id="lhtop"
-                        inputMode="numeric"
-                        value={settings.preprintedTopMm}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            preprintedTopMm: Number(e.target.value) || 0,
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="card-head" style={{ marginBottom: "var(--s-14)" }}>
-                    <span className="card-title">Verifier</span>
-                  </div>
-                  <div className="grid cols-3">
-                    <div className="field">
-                      <label htmlFor="vname">Name</label>
-                      <input
-                        id="vname"
-                        placeholder="Dr. …"
-                        value={settings.verifierName}
-                        onChange={(e) =>
-                          setSettings({ ...settings, verifierName: e.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="vqual">Qualification</label>
-                      <input
-                        id="vqual"
-                        placeholder="MD Pathology"
-                        value={settings.verifierQualification}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            verifierQualification: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="vnmc">NMC registration no.</label>
-                      <input
-                        id="vnmc"
-                        value={settings.verifierNmc}
-                        onChange={(e) =>
-                          setSettings({ ...settings, verifierNmc: e.target.value })
-                        }
-                      />
-                    </div>
+          {view === "newPatient" && (
+            <div className="no-print">
+              <div className="page-head">
+                <div>
+                  <h1>New patient</h1>
+                  <div className="page-sub">
+                    A registration number is assigned automatically
                   </div>
                 </div>
               </div>
-            )}
+              <div className="card pad" style={{ maxWidth: "780px" }}>
+                <PatientForm
+                  draft={draft}
+                  mode="create"
+                  busy={busy}
+                  onChange={setDraft}
+                  onSave={savePatient}
+                  onCancel={() => setView("patients")}
+                  onUseExisting={(p) => beginOrder(p)}
+                />
+              </div>
+            </div>
+          )}
+
+          {view === "order" && activePatient && (
+            <div className="no-print">
+              <div className="page-head">
+                <div>
+                  <h1>Choose tests</h1>
+                  <div className="page-sub">
+                    {patientLine}
+                    {accession ? ` · ${accession}` : ""}
+                  </div>
+                </div>
+                <div className="spacer" />
+                <button onClick={() => startEdit(activePatient)}>
+                  <IconEdit /> Edit patient
+                </button>
+              </div>
+
+              {orderId && (
+                <div className="notice">
+                  Editing order {accession}. Changing the selection updates this
+                  order rather than creating a second one.
+                </div>
+              )}
+
+              <div className="grid cols-2">
+                {PANELS.map((panel) => {
+                  const on = panelIds.includes(panel.id);
+                  return (
+                    <button
+                      key={panel.id}
+                      onClick={() =>
+                        setPanelIds((prev) =>
+                          prev.includes(panel.id)
+                            ? prev.filter((x) => x !== panel.id)
+                            : [...prev, panel.id],
+                        )
+                      }
+                      aria-pressed={on}
+                      style={{
+                        display: "block",
+                        textAlign: "left",
+                        padding: "var(--s-16)",
+                        borderRadius: "var(--r-14)",
+                        borderColor: on ? "var(--primary)" : "var(--border)",
+                        background: on ? "var(--primary-tint)" : "var(--surface)",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: "var(--t-strong)" }}>
+                        {on ? "☑" : "☐"} {panel.title}
+                      </div>
+                      <div
+                        style={{
+                          color: "var(--text-faint)",
+                          fontSize: "var(--t-control)",
+                          marginTop: "3px",
+                        }}
+                      >
+                        {panel.department}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="toolbar">
+                <button onClick={() => setView("patients")}>← Back</button>
+                <div className="spacer" />
+                <span style={{ color: "var(--text-faint)" }}>
+                  {panelIds.length} selected
+                </span>
+                <button
+                  className="primary"
+                  disabled={busy || panelIds.length === 0}
+                  onClick={startEntry}
+                >
+                  {busy
+                    ? "Saving…"
+                    : orderId
+                      ? "Update & enter results →"
+                      : "Enter results →"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {view === "entry" && activePatient && (
+            <div className="no-print">
+              <div className="page-head">
+                <div>
+                  <h1>Enter results</h1>
+                  <div className="page-sub">
+                    {patientLine} · {accession} · Sample {toBs(sampleDateISO)} BS
+                  </div>
+                </div>
+              </div>
+
+              {criticals.length > 0 && (
+                <div className="banner">
+                  <strong>
+                    {criticals.length} critical value
+                    {criticals.length > 1 ? "s" : ""} detected.
+                  </strong>
+                  <ul style={{ margin: "var(--s-8) 0" }}>
+                    {criticals.map((c) => (
+                      <li key={c.analyte.id}>
+                        {c.analyte.name}: {c.display} {c.analyte.unit ?? ""}
+                      </li>
+                    ))}
+                  </ul>
+                  <label
+                    style={{
+                      fontSize: "var(--t-body)",
+                      display: "flex",
+                      gap: "var(--s-8)",
+                      alignItems: "center",
+                      marginBottom: 0,
+                      color: "var(--text)",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={criticalAcknowledged}
+                      onChange={(e) => setCriticalAcknowledged(e.target.checked)}
+                      style={{ width: "auto" }}
+                    />
+                    I confirm these results have been re-checked.
+                  </label>
+                </div>
+              )}
+
+              <div className="notice">
+                <kbd>Enter</kbd> or <kbd>↓</kbd> moves to the next test. Greyed rows
+                are calculated automatically and cannot be typed into.
+              </div>
+
+              <ResultEntry
+                patient={activePatient}
+                panelIds={panelIds}
+                values={values}
+                comments={comments}
+                computed={computed}
+                onChange={(id, v) => setValues((prev) => ({ ...prev, [id]: v }))}
+                onCommentChange={(id, v) => setComments((prev) => ({ ...prev, [id]: v }))}
+              />
+
+              <div className="toolbar">
+                <button onClick={() => setView("order")}>← Tests</button>
+                <div className="spacer" />
+                <span style={{ color: "var(--text-faint)" }}>
+                  {progress.entered} of {progress.total} entered
+                </span>
+                <button
+                  className="primary"
+                  disabled={
+                    busy ||
+                    progress.entered === 0 ||
+                    (criticals.length > 0 && !criticalAcknowledged)
+                  }
+                  onClick={goToPreview}
+                >
+                  {busy ? "Saving…" : "Save & preview →"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {view === "preview" && activePatient && (
+            <>
+              <div className="no-print">
+                <div className="page-head">
+                  <div>
+                    <h1>Report preview</h1>
+                    <div className="page-sub">
+                      {patientLine} · {accession}
+                    </div>
+                  </div>
+                  <div className="spacer" />
+                  <button onClick={() => setView("entry")}>← Edit results</button>
+                  <button
+                    onClick={() =>
+                      setOrg({
+                        ...org,
+                        letterhead_mode:
+                          org.letterhead_mode === "full" ? "preprinted" : "full",
+                      })
+                    }
+                    title="Preview only — set it permanently in Settings"
+                  >
+                    {org.letterhead_mode === "full"
+                      ? "Letterhead: app-printed"
+                      : "Letterhead: preprinted"}
+                  </button>
+                  {releasedVersion > 0 ? (
+                    <>
+                      <span className="pill green">Released v{releasedVersion}</span>
+                      <button className="primary" onClick={() => window.print()}>
+                        <IconPrint /> Reprint
+                      </button>
+                    </>
+                  ) : canRelease ? (
+                    <button className="primary" disabled={busy} onClick={doRelease}>
+                      {busy ? "Releasing…" : "Verify & release"}
+                    </button>
+                  ) : (
+                    <span className="pill amber">A verifier must release this</span>
+                  )}
+                </div>
+              </div>
+
+              <div id="print-root">
+                <ReportSheet
+                  patient={activePatient}
+                  panelIds={panelIds}
+                  computed={computed}
+                  comments={comments}
+                  accession={accession}
+                  sampleDateISO={sampleDateISO}
+                  reportDateISO={new Date().toISOString()}
+                  org={org}
+                />
+              </div>
+            </>
+          )}
+
+          {view === "settings" && (
+            <div className="no-print">
+              <SettingsView
+                profile={profile}
+                org={org}
+                theme={theme}
+                busy={busy}
+                onChange={setOrg}
+                onSave={saveOrg}
+                onToggleTheme={toggleTheme}
+              />
+            </div>
+          )}
         </div>
       </div>
+
+      {editing && (
+        <div
+          className="scrim no-print"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Edit patient"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setEditing(null);
+          }}
+        >
+          <div className="modal">
+            <div className="modal-title">Edit patient</div>
+            <div className="modal-body">
+              MRN {editing.mrn} — the registration number never changes.
+            </div>
+            <PatientForm
+              draft={draft}
+              mode="edit"
+              busy={busy}
+              onChange={setDraft}
+              onSave={savePatient}
+              onCancel={() => setEditing(null)}
+            />
+          </div>
+        </div>
+      )}
+
+      {confirmSignOut && (
+        <ConfirmDialog
+          title="Sign out?"
+          body="Any results typed but not yet saved will be lost. Anything already saved stays on the server."
+          confirmLabel="Sign out"
+          danger
+          onCancel={() => setConfirmSignOut(false)}
+          onConfirm={async () => {
+            setConfirmSignOut(false);
+            await signOut();
+            setProfile(null);
+          }}
+        />
+      )}
     </div>
   );
 }
