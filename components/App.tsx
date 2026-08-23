@@ -12,6 +12,7 @@ import {
   nextAccessionDb,
   recentReports,
   releaseReport,
+  markAwaitingVerification,
   saveResults,
   signOut,
   type Profile,
@@ -37,9 +38,11 @@ import type { Panel, Patient, ReportRecord, Sex } from "@/lib/types";
 import { Dashboard } from "./Dashboard";
 import {
   IconBell,
+  IconExport,
   IconFlask,
   IconGear,
   IconGrid,
+  IconList,
   IconLogout,
   IconPrint,
   IconSearch,
@@ -267,13 +270,15 @@ export function App() {
     setBusy(true);
     try {
       await saveResults(orderId, values, (a) => PANEL_OF_ANALYTE.get(a) ?? "", profile.id);
+      await markAwaitingVerification(orderId);
+      await refreshOverview();
       setView("preview");
     } catch (e) {
       fail(e);
     } finally {
       setBusy(false);
     }
-  }, [profile, orderId, values]);
+  }, [profile, orderId, values, refreshOverview]);
 
   const doRelease = useCallback(async () => {
     if (!profile || !orderId) return;
@@ -323,7 +328,7 @@ export function App() {
   if (booting) {
     return (
       <div className="auth-page">
-        <p className="muted">Loading…</p>
+        <p className="card-sub">Loading…</p>
       </div>
     );
   }
@@ -354,12 +359,28 @@ export function App() {
       } / ${activePatient.ageYears} yrs`
     : "";
 
-  const nav: { key: View; label: string; icon: React.ReactNode }[] = [
-    { key: "dashboard", label: "Dashboard", icon: <IconGrid /> },
-    { key: "patients", label: "Patients", icon: <IconUser /> },
-    { key: "reports", label: "Reports", icon: <IconFlask /> },
-    { key: "settings", label: "Settings", icon: <IconGear /> },
-  ];
+  /** Exports the current page of patients. Deliberately client-side: it only
+   *  contains what the technician can already see on screen, and it is logged. */
+  const exportCsv = () => {
+    const CRLF = String.fromCharCode(13, 10);
+    const header = ["MRN", "Name", "Sex", "Age", "Phone", "Address", "Referred by", "Visits"];
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const body = rows.map((r) =>
+      [r.mrn, r.fullName, r.sex, String(r.ageYears), r.phone, r.address, r.referredBy, String(r.visitCount)]
+        .map(esc)
+        .join(","),
+    );
+    const blob = new Blob([[header.map(esc).join(","), ...body].join(CRLF)], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `trp-patients-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    if (profile) void audit(profile.id, "patient.export", "patient", undefined, { rows: rows.length });
+  };
 
   const goNewPatient = () => {
     setDraft(EMPTY_PATIENT);
@@ -369,12 +390,11 @@ export function App() {
   };
 
   return (
-    <div className="page">
-      <div className="frame">
+    <div className="wrap">
         <header className="topbar no-print">
           <div className="brand-chip">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.jpg" alt="" className="brand-logo" />
+            <img src="/trp-logo.png" alt="" className="brand-logo" />
             <div>
               <div className="brand-name">TRP POLYCLINIC</div>
               <div className="brand-sub">Tandi Ratnanagar · Pathology</div>
@@ -395,12 +415,27 @@ export function App() {
             />
           </div>
 
-          <div className="topbar-actions">
+          <div className="topbar-right">
             <button onClick={goNewPatient}>+ Patient</button>
             <button onClick={() => setView("patients")}>+ Lab order</button>
-            <span className="icon-square" aria-hidden="true">
+            <button
+              disabled
+              title="Billing is not built yet"
+              aria-label="New invoice — billing is not built yet"
+            >
+              + Invoice
+            </button>
+            <button className="icon-btn" disabled title="Notifications — not built yet">
               <IconBell />
-            </span>
+            </button>
+            <button
+              className="icon-btn"
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => setView("settings")}
+            >
+              <IconGear size={17} />
+            </button>
             <button
               className="avatar"
               title={`${profile.full_name} — sign out`}
@@ -417,21 +452,52 @@ export function App() {
 
         <div className="body-split">
           <nav className="rail no-print" aria-label="Main">
-            {nav.map((n) => (
-              <button
-                key={n.key}
-                className={`rail-btn ${view === n.key ? "active" : ""}`}
-                onClick={() => setView(n.key)}
-                title={n.label}
-                aria-label={n.label}
-                aria-current={view === n.key ? "page" : undefined}
-              >
-                {n.icon}
-              </button>
-            ))}
-            <div className="spacer" />
+            <button
+              className={`rail-btn ${view === "dashboard" ? "active" : ""}`}
+              onClick={() => setView("dashboard")}
+              title="Dashboard"
+              aria-label="Dashboard"
+              aria-current={view === "dashboard" ? "page" : undefined}
+            >
+              <IconGrid />
+            </button>
+            <button
+              className={`rail-btn ${view === "patients" ? "active" : ""}`}
+              onClick={() => setView("patients")}
+              title="Patients"
+              aria-label="Patients"
+              aria-current={view === "patients" ? "page" : undefined}
+            >
+              <IconUser />
+            </button>
+            <button
+              className={`rail-btn ${view === "reports" ? "active" : ""}`}
+              onClick={() => setView("reports")}
+              title="Reports"
+              aria-label="Reports"
+              aria-current={view === "reports" ? "page" : undefined}
+            >
+              <IconFlask />
+            </button>
             <button
               className="rail-btn"
+              disabled
+              title="Billing — not built yet"
+              aria-label="Billing — not built yet"
+            >
+              <IconList />
+            </button>
+            <button
+              className={`rail-btn ${view === "settings" ? "active" : ""}`}
+              onClick={() => setView("settings")}
+              title="Settings"
+              aria-label="Settings"
+              aria-current={view === "settings" ? "page" : undefined}
+            >
+              <IconGear />
+            </button>
+            <button
+              className="rail-btn pushdown"
               title="Sign out"
               aria-label="Sign out"
               onClick={async () => {
@@ -449,7 +515,7 @@ export function App() {
                 <strong>{error}</strong>
                 <button
                   className="ghost"
-                  style={{ marginLeft: "var(--space-4)" }}
+                  style={{ marginLeft: "var(--s-14)" }}
                   onClick={() => setError("")}
                 >
                   Dismiss
@@ -462,6 +528,9 @@ export function App() {
                 <Dashboard
                   stats={stats}
                   activity={activity}
+                  orders={reports}
+                  onOpenOrder={(r) => openReport(r, "reports")}
+                  onNewOrder={() => setView("patients")}
                   onViewAll={() => setView("reports")}
                 />
               </div>
@@ -478,6 +547,9 @@ export function App() {
                     </div>
                   </div>
                   <div className="spacer" />
+                  <button onClick={exportCsv} disabled={rows.length === 0}>
+                    <IconExport /> Export CSV
+                  </button>
                   <button className="primary" onClick={goNewPatient}>
                     + New patient
                   </button>
@@ -517,10 +589,10 @@ export function App() {
                 </div>
 
                 <div className="verify-split">
-                  <div className="card" style={{ padding: "var(--space-4)" }}>
+                  <div className="card pad">
                     <div
                       className="card-title"
-                      style={{ fontSize: "var(--text-lg)", margin: "4px 4px 12px" }}
+                      style={{ fontSize: "var(--t-card)", margin: "4px 4px 12px" }}
                     >
                       Verification queue
                     </div>
@@ -533,7 +605,7 @@ export function App() {
                           className={`queue-item ${orderId === r.id ? "on" : ""}`}
                           onClick={() => openReport(r)}
                         >
-                          <div className="row" style={{ gap: "var(--space-2)" }}>
+                          <div className="row" style={{ gap: "var(--s-8)" }}>
                             <span className="queue-name">
                               {r.patientSnapshot.fullName}
                             </span>
@@ -559,39 +631,21 @@ export function App() {
                   </div>
 
                   {activePatient && orderId ? (
-                    <div className="card" style={{ padding: "24px 26px" }}>
+                    <div className="card" style={{ padding: "var(--s-24) var(--s-26)" }}>
                       <div
                         className="row"
                         style={{
                           alignItems: "flex-start",
-                          paddingBottom: "var(--space-5)",
-                          borderBottom: "1px solid var(--border-soft)",
+                          paddingBottom: "var(--s-18)",
+                          borderBottom: "1px solid var(--divider-head)",
                         }}
                       >
                         <div>
-                          <div
-                            style={{
-                              fontSize: "var(--text-xl)",
-                              fontWeight: 800,
-                              letterSpacing: "-0.01em",
-                            }}
-                          >
-                            {activePatient.fullName}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "var(--text-base)",
-                              color: "var(--text-secondary)",
-                              marginTop: "5px",
-                            }}
-                          >
-                            {activePatient.sex === "M"
-                              ? "Male"
-                              : activePatient.sex === "F"
-                                ? "Female"
-                                : "Other"}{" "}
-                            / {activePatient.ageYears} yrs ·{" "}
-                            {selectedPanels.map((p) => p.title).join(", ")}
+                          <div className="report-title">{activePatient.fullName}</div>
+                          <div className="report-meta">
+                            {selectedPanels.map((p) => p.title).join(", ")} ·{" "}
+                            {selectedPanels[0]?.department ?? "—"} · Report #
+                            {accession}
                           </div>
                         </div>
                         <div className="spacer" />
@@ -599,7 +653,7 @@ export function App() {
                           <IconPrint /> Print
                         </button>
                         {releasedVersion > 0 ? (
-                          <span className="chip good">Released v{releasedVersion}</span>
+                          <span className="pill green">Released v{releasedVersion}</span>
                         ) : canRelease ? (
                           <button
                             className="primary"
@@ -609,7 +663,7 @@ export function App() {
                             {busy ? "Releasing…" : "Verify & release"}
                           </button>
                         ) : (
-                          <span className="chip warn">Verifier must release</span>
+                          <span className="pill amber">Verifier must release</span>
                         )}
                       </div>
 
@@ -636,16 +690,10 @@ export function App() {
                         </div>
                       </div>
 
-                      <div className="analyte-panel">
+                      <div className="result-panel">
                         <div
                           className="ghead"
-                          style={{
-                            gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr",
-                            padding: "14px 6px 10px",
-                            borderBottom: "1px solid var(--border)",
-                            fontWeight: 700,
-                            fontSize: "12px",
-                          }}
+                          style={{ gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr" }}
                         >
                           <div>Analyte</div>
                           <div>Result</div>
@@ -662,13 +710,9 @@ export function App() {
                               <div
                                 key={c.analyte.id}
                                 className="grow"
-                                style={{
-                                  gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr",
-                                  padding: "11px 6px",
-                                  borderBottom: "1px solid #eff1f5",
-                                }}
+                                style={{ gridTemplateColumns: "1.6fr .8fr .7fr 1.1fr .7fr" }}
                               >
-                                <div className="cell-dim" style={{ color: "var(--text-body)" }}>
+                                <div className="cell-dim" style={{ color: "var(--text-secondary)" }}>
                                   {c.analyte.name}
                                 </div>
                                 <div
@@ -676,8 +720,8 @@ export function App() {
                                     fontWeight: 700,
                                     color: abnormal
                                       ? marker === "H"
-                                        ? "var(--flag-high)"
-                                        : "var(--flag-low)"
+                                        ? "var(--danger-fg)"
+                                        : "var(--warning-fg)"
                                       : "var(--text)",
                                   }}
                                 >
@@ -688,13 +732,25 @@ export function App() {
                                   {c.analyte.rangeLines.join(" / ")}
                                 </div>
                                 <div>
-                                  {abnormal && (
-                                    <span
-                                      className={`chip ${marker === "H" ? "danger" : "info"}`}
-                                    >
-                                      {isCritical(c.flag) ? `${marker} critical` : marker}
-                                    </span>
-                                  )}
+                                  <span
+                                    className={`pill ${
+                                      marker === "H"
+                                        ? "red"
+                                        : marker === "L"
+                                          ? "amber"
+                                          : "green"
+                                    }`}
+                                  >
+                                    {isCritical(c.flag)
+                                      ? marker === "H"
+                                        ? "Critical high"
+                                        : "Critical low"
+                                      : marker === "H"
+                                        ? "High"
+                                        : marker === "L"
+                                          ? "Low"
+                                          : "Normal"}
+                                  </span>
                                 </div>
                               </div>
                             );
@@ -704,14 +760,14 @@ export function App() {
                       <div className="note-row">
                         <div className="note-box">
                           <div className="note-k">Comment</div>
-                          <div style={{ fontSize: "var(--text-base)", lineHeight: 1.55 }}>
+                          <div style={{ fontSize: "var(--t-body)", lineHeight: 1.55 }}>
                             {Object.values(comments).filter(Boolean).join(" ") ||
                               "No comment recorded."}
                           </div>
                         </div>
                         <div className="note-box narrow">
                           <div className="note-k">Signed by</div>
-                          <div style={{ fontSize: "var(--text-md)", fontWeight: 700 }}>
+                          <div style={{ fontSize: "var(--t-strong)", fontWeight: 700 }}>
                             {settings.verifierName || "Not set"}
                           </div>
                           <div
@@ -759,7 +815,7 @@ export function App() {
                       onChange={(e) => setDraft({ ...draft, fullName: e.target.value })}
                     />
                     {duplicates.length > 0 && (
-                      <p style={{ color: "var(--warn-fg)", fontSize: "var(--text-sm)" }}>
+                      <p style={{ color: "var(--warning-fg)", fontSize: "var(--t-control)" }}>
                         {duplicates.length} existing patient
                         {duplicates.length > 1 ? "s" : ""} with this name (
                         {duplicates.map((d) => `MRN ${d.mrn}, ${d.ageYears}y`).join("; ")}
@@ -870,19 +926,19 @@ export function App() {
                         style={{
                           display: "block",
                           textAlign: "left",
-                          padding: "var(--space-5)",
-                          borderRadius: "var(--radius-xl)",
-                          borderColor: on ? "var(--brand)" : "var(--border)",
-                          background: on ? "var(--brand-weak)" : "var(--surface)",
+                          padding: "var(--s-18)",
+                          borderRadius: "var(--r-16)",
+                          borderColor: on ? "var(--primary)" : "var(--border)",
+                          background: on ? "var(--primary-tint)" : "var(--surface)",
                         }}
                       >
-                        <div style={{ fontWeight: 700, fontSize: "var(--text-md)" }}>
+                        <div style={{ fontWeight: 700, fontSize: "var(--t-strong)" }}>
                           {on ? "☑" : "☐"} {panel.title}
                         </div>
                         <div
                           style={{
                             color: "var(--text-faint)",
-                            fontSize: "var(--text-sm)",
+                            fontSize: "var(--t-control)",
                             marginTop: "3px",
                           }}
                         >
@@ -896,7 +952,7 @@ export function App() {
                 <div className="toolbar">
                   <button onClick={() => setView("patients")}>← Back</button>
                   <div className="spacer" />
-                  <span className="muted">{panelIds.length} selected</span>
+                  <span className="card-sub">{panelIds.length} selected</span>
                   <button
                     className="primary"
                     disabled={busy || panelIds.length === 0}
@@ -925,7 +981,7 @@ export function App() {
                       {criticals.length} critical value
                       {criticals.length > 1 ? "s" : ""} detected.
                     </strong>
-                    <ul style={{ margin: "var(--space-3) 0" }}>
+                    <ul style={{ margin: "var(--s-10) 0" }}>
                       {criticals.map((c) => (
                         <li key={c.analyte.id}>
                           {c.analyte.name}: {c.display} {c.analyte.unit ?? ""}
@@ -934,9 +990,9 @@ export function App() {
                     </ul>
                     <label
                       style={{
-                        fontSize: "var(--text-base)",
+                        fontSize: "var(--t-body)",
                         display: "flex",
-                        gap: "var(--space-3)",
+                        gap: "var(--s-10)",
                         alignItems: "center",
                         marginBottom: 0,
                         color: "var(--text)",
@@ -973,7 +1029,7 @@ export function App() {
                 <div className="toolbar">
                   <button onClick={() => setView("order")}>← Tests</button>
                   <div className="spacer" />
-                  <span className="muted">
+                  <span className="card-sub">
                     {progress.entered} of {progress.total} entered
                   </span>
                   <button
@@ -1014,7 +1070,7 @@ export function App() {
                     </button>
                     {releasedVersion > 0 ? (
                       <>
-                        <span className="chip good">Released v{releasedVersion}</span>
+                        <span className="pill green">Released v{releasedVersion}</span>
                         <button className="primary" onClick={() => window.print()}>
                           <IconPrint /> Reprint
                         </button>
@@ -1024,7 +1080,7 @@ export function App() {
                         {busy ? "Releasing…" : "Verify & release"}
                       </button>
                     ) : (
-                      <span className="chip warn">A verifier must release this</span>
+                      <span className="pill amber">A verifier must release this</span>
                     )}
                   </div>
                 </div>
@@ -1064,7 +1120,7 @@ export function App() {
                 </div>
 
                 <div className="card">
-                  <div className="card-head" style={{ marginBottom: "var(--space-4)" }}>
+                  <div className="card-head" style={{ marginBottom: "var(--s-14)" }}>
                     <span className="card-title">Clinic</span>
                   </div>
                   <div className="field">
@@ -1112,7 +1168,7 @@ export function App() {
                 </div>
 
                 <div className="card">
-                  <div className="card-head" style={{ marginBottom: "var(--space-4)" }}>
+                  <div className="card-head" style={{ marginBottom: "var(--s-14)" }}>
                     <span className="card-title">Letterhead</span>
                   </div>
                   <div className="grid cols-2">
@@ -1155,7 +1211,7 @@ export function App() {
                 </div>
 
                 <div className="card">
-                  <div className="card-head" style={{ marginBottom: "var(--space-4)" }}>
+                  <div className="card-head" style={{ marginBottom: "var(--s-14)" }}>
                     <span className="card-title">Verifier</span>
                   </div>
                   <div className="grid cols-3">
@@ -1198,7 +1254,6 @@ export function App() {
                 </div>
               </div>
             )}
-          </div>
         </div>
       </div>
     </div>

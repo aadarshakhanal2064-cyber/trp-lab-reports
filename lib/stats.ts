@@ -10,6 +10,7 @@ export interface PatientRow {
   sex: Sex;
   ageYears: number;
   phone: string;
+  address: string;
   referredBy: string;
   createdAt: string;
   visitCount: number;
@@ -54,6 +55,7 @@ interface OverviewRow {
   sex: Sex;
   age_years: number;
   phone: string | null;
+  address: string | null;
   referred_by: string | null;
   created_at: string;
   visit_count: number;
@@ -69,6 +71,7 @@ function toRow(r: OverviewRow): PatientRow {
     sex: r.sex,
     ageYears: r.age_years,
     phone: r.phone ?? "",
+    address: r.address ?? "",
     referredBy: r.referred_by ?? "",
     createdAt: r.created_at,
     visitCount: Number(r.visit_count ?? 0),
@@ -88,7 +91,7 @@ export async function listPatients(
   let q = supabase
     .from("patient_overview")
     .select(
-      "id, mrn, full_name, sex, age_years, phone, referred_by, created_at, visit_count, last_visit, pending_count",
+      "id, mrn, full_name, sex, age_years, phone, address, referred_by, created_at, visit_count, last_visit, pending_count",
       { count: "exact" },
     );
 

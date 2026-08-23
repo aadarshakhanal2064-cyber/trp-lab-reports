@@ -4,6 +4,9 @@ export type ValueType = "numeric" | "text" | "picklist";
 
 export type Flag = "N" | "H" | "L" | "CH" | "CL";
 
+/** Lifecycle of a lab order, mirroring the lab_orders.status column. */
+export type OrderStatus = "in_progress" | "awaiting_verification" | "released";
+
 /** One interpretive band, e.g. "Border-line High: 161-199". */
 export interface Band {
   label: string;
@@ -97,7 +100,7 @@ export interface ReportRecord {
   sampleDateISO: string;
   reportDateISO: string;
   createdAtISO: string;
-  status: "draft" | "released";
+  status: OrderStatus;
   verifierName?: string;
   verifierQualification?: string;
   verifierNmc?: string;

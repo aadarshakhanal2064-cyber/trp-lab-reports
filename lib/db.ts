@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { Patient, ReportRecord, Sex } from "./types";
+import type { OrderStatus, Patient, ReportRecord, Sex } from "./types";
 
 /**
  * Data access. Replaces lib/storage.ts (browser localStorage) now that there is
@@ -234,6 +234,15 @@ export async function saveResults(
   if (error) throw new Error(`Could not save results: ${error.message}`);
 }
 
+/** Moves an order into the verifier's queue once results have been entered. */
+export async function markAwaitingVerification(orderId: string): Promise<void> {
+  await supabase
+    .from("lab_orders")
+    .update({ status: "awaiting_verification" })
+    .eq("id", orderId)
+    .neq("status", "released");
+}
+
 /* ---------------------------------------------------------------- */
 /* Report release                                                    */
 /* ---------------------------------------------------------------- */
@@ -335,7 +344,7 @@ export async function recentReports(limit = 15): Promise<ReportRecord[]> {
         sampleDateISO: o.sample_collected_at,
         reportDateISO: o.sample_collected_at,
         createdAtISO: o.sample_collected_at,
-        status: o.status === "released" ? "released" : "draft",
+        status: o.status as OrderStatus,
       } satisfies ReportRecord;
     });
 }

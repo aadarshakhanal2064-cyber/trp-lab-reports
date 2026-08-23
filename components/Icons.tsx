@@ -47,6 +47,13 @@ export const IconList = ({ size = 19 }: P) => (
   </svg>
 );
 
+export const IconExport = ({ size = 15 }: P) => (
+  <svg {...base(size, 1.8)}>
+    <path d="M12 15V3M8 7l4-4 4 4" />
+    <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </svg>
+);
+
 export const IconGear = ({ size = 19 }: P) => (
   <svg {...base(size)}>
     <circle cx="12" cy="12" r="3.2" />

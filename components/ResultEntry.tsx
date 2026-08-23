@@ -84,7 +84,7 @@ export function ResultEntry({
     <>
       {panels.map((panel) => (
         <div className="card" key={panel.id}>
-          <div className="row" style={{ marginBottom: "var(--space-3)" }}>
+          <div className="row" style={{ marginBottom: "var(--s-10)" }}>
             <h2 style={{ margin: 0 }}>{panel.title}</h2>
             <span className="pill">{panel.department}</span>
           </div>
@@ -124,7 +124,7 @@ export function ResultEntry({
                     </td>
 
                     <td className="value-cell">
-                      <div className="row" style={{ gap: "var(--space-1)", flexWrap: "nowrap" }}>
+                      <div className="row" style={{ gap: "var(--s-4)", flexWrap: "nowrap" }}>
                         {derived ? (
                           <input
                             value={value?.display ?? ""}
@@ -184,7 +184,7 @@ export function ResultEntry({
           </table>
 
           {panel.hasComment && (
-            <div className="field" style={{ marginTop: "var(--space-3)" }}>
+            <div className="field" style={{ marginTop: "var(--s-10)" }}>
               <label htmlFor={`comment-${panel.id}`}>Comment (optional)</label>
               <textarea
                 id={`comment-${panel.id}`}
@@ -197,7 +197,7 @@ export function ResultEntry({
         </div>
       ))}
 
-      <p className="muted">
+      <p className="card-sub">
         Ranges shown are for {patient.sex === "F" ? "female" : patient.sex === "M" ? "male" : "unspecified"},
         age {patient.ageYears}. Changing the patient&apos;s sex or age changes the
         applicable range and the flags.

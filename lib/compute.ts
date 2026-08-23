@@ -1,5 +1,5 @@
 import { analytesOf } from "./catalog";
-import { computeFlag } from "./ranges";
+import { computeFlag, isCritical } from "./ranges";
 import type { Analyte, Flag, Panel, Sex } from "./types";
 
 export interface ComputedValue {
@@ -130,4 +130,18 @@ export function enteredCount(
   const analytes = panels.flatMap(analytesOf).filter((a) => !a.formula);
   const entered = analytes.filter((a) => (rawValues[a.id] ?? "").trim() !== "").length;
   return { entered, total: analytes.length };
+}
+
+/** True when any value in these panels is a panic value. Drives the Urgent flag. */
+export function hasCritical(
+  panels: Panel[],
+  rawValues: Record<string, string>,
+  sex: Sex,
+  ageYears: number,
+): boolean {
+  const computed = computeAll(panels, rawValues, sex, ageYears);
+  for (const v of computed.values()) {
+    if (isCritical(v.flag)) return true;
+  }
+  return false;
 }

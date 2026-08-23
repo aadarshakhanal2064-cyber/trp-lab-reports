@@ -22,10 +22,9 @@ const FILTERS: { key: PatientFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "pending", label: "Active orders" },
   { key: "returning", label: "Returning" },
-  { key: "new", label: "New" },
 ];
 
-const COLUMNS = "1.6fr .9fr .8fr 1.1fr 1fr .8fr .9fr";
+const COLS = "1.6fr .9fr .8fr 1.1fr 1fr .9fr .8fr 60px";
 
 export function PatientsTable({
   rows,
@@ -44,7 +43,7 @@ export function PatientsTable({
 
   return (
     <div className="card">
-      <div className="card-head">
+      <div className="toolbar-row">
         <div className="tabs">
           {FILTERS.map((f) => (
             <button
@@ -68,9 +67,9 @@ export function PatientsTable({
         </div>
       </div>
 
-      <div className="grid-scroll">
-        <div style={{ minWidth: "860px" }}>
-          <div className="ghead" style={{ gridTemplateColumns: COLUMNS }}>
+      <div className="gscroll">
+        <div style={{ minWidth: "900px" }}>
+          <div className="ghead" style={{ gridTemplateColumns: COLS }}>
             <div>Name</div>
             <div>MRN</div>
             <div>Age / Sex</div>
@@ -78,6 +77,7 @@ export function PatientsTable({
             <div>Last visit</div>
             <div>Reports</div>
             <div>Status</div>
+            <div>Action</div>
           </div>
 
           {loading ? (
@@ -93,15 +93,15 @@ export function PatientsTable({
               <button
                 key={r.id}
                 className="grow"
-                style={{ gridTemplateColumns: COLUMNS }}
+                style={{ gridTemplateColumns: COLS }}
                 onClick={() => onOpen(r)}
               >
                 <div className="cell-name">
-                  <span className="initials">{initialsOf(r.fullName)}</span>
+                  <span className="ini">{initialsOf(r.fullName)}</span>
                   <div style={{ minWidth: 0 }}>
                     <div className="cell-strong">{r.fullName}</div>
                     <div className="cell-sub">
-                      {r.referredBy ? `Ref: ${r.referredBy}` : "No referring doctor"}
+                      {r.address || "Ratnanagar, Chitwan"}
                     </div>
                   </div>
                 </div>
@@ -116,26 +116,25 @@ export function PatientsTable({
                 <div style={{ fontWeight: 600 }}>{r.visitCount}</div>
                 <div>
                   {r.pendingCount > 0 ? (
-                    <span className="chip warn">In progress</span>
-                  ) : r.visitCount > 1 ? (
-                    <span className="chip info">Returning</span>
-                  ) : r.visitCount === 1 ? (
-                    <span className="chip good">Complete</span>
+                    <span className="pill lg amber">In progress</span>
+                  ) : r.visitCount > 0 ? (
+                    <span className="pill lg green">Clear</span>
                   ) : (
-                    <span className="chip neutral">New</span>
+                    <span className="pill lg grey">New</span>
                   )}
                 </div>
+                <div className="cell-action">•••</div>
               </button>
             ))
           )}
         </div>
       </div>
 
-      <div className="grid-foot">
+      <div className="gfoot">
         <span>
           {total === 0
             ? "No patients"
-            : `Showing ${page * pageSize + 1}–${Math.min(total, (page + 1) * pageSize)} of ${total.toLocaleString()} patients`}
+            : `Showing ${Math.min(rows.length, pageSize)} of ${total.toLocaleString()} patients`}
         </span>
         <div className="pager">
           <button className="tiny" disabled={page === 0} onClick={() => onPage(page - 1)}>
