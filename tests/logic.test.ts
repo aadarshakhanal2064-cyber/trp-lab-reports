@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { PANEL_BY_ID, findAnalyte } from "../lib/catalog.ts";
 import { computeAll, roundHalfUp } from "../lib/compute.ts";
+import { initialsOf } from "../components/Icons.tsx";
 import { toBs } from "../lib/dates.ts";
 import { computeFlag, resolveRule } from "../lib/ranges.ts";
 import type { Panel } from "../lib/types.ts";
@@ -200,4 +201,18 @@ test("typed values pass through untouched, derived ones are formatted", () => {
   assert.equal(c.get("hb")?.display, "11.2");
   assert.equal(c.get("hb")?.isDerived, false);
   assert.equal(c.get("neut_abs")?.isDerived, true);
+});
+
+/* ---------------------------------------------------------------- */
+/* Display helpers                                                   */
+/* ---------------------------------------------------------------- */
+
+test("initials ignore punctuation and extra words", () => {
+  assert.equal(initialsOf("Ram Bahadur Thapa"), "RT");
+  assert.equal(initialsOf("Sita"), "S");
+  assert.equal(initialsOf("UI Test Account (disabled)"), "UD");
+  assert.equal(initialsOf("  keshav   gautam  "), "KG");
+  assert.equal(initialsOf("राम थापा"), "रथ");
+  assert.equal(initialsOf("((("), "?");
+  assert.equal(initialsOf(""), "?");
 });
