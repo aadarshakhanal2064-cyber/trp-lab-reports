@@ -1,36 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Organisation, Profile } from "@/lib/db";
 import { dualDate } from "@/lib/dates";
+import { IconCheck } from "./Icons";
 
 interface Props {
   profile: Profile;
   org: Organisation;
+  /** What is currently stored, so we can tell whether anything actually changed. */
+  savedOrg: Organisation;
   theme: "light" | "dark";
   busy: boolean;
   onChange: (o: Organisation) => void;
-  onSave: () => void;
+  /** Resolves true when the save reached the database. */
+  onSave: () => Promise<boolean>;
+  onRevert: () => void;
   onToggleTheme: () => void;
 }
 
 export function SettingsView({
   profile,
   org,
+  savedOrg,
   theme,
   busy,
   onChange,
   onSave,
+  onRevert,
   onToggleTheme,
 }: Props) {
-  const [saved, setSaved] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
   const isAdmin = profile.role === "admin";
+  const dirty = JSON.stringify(org) !== JSON.stringify(savedOrg);
+
+  /* Clear the confirmation as soon as the form is touched again. */
+  useEffect(() => {
+    if (dirty) setJustSaved(false);
+  }, [dirty]);
 
   const save = async () => {
-    await onSave();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    const ok = await onSave();
+    if (ok) {
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 4000);
+    }
   };
+
+  const set = <K extends keyof Organisation>(key: K, value: Organisation[K]) =>
+    onChange({ ...org, [key]: value });
 
   return (
     <>
@@ -44,12 +62,6 @@ export function SettingsView({
             {dualDate(new Date().toISOString())}
           </div>
         </div>
-        <div className="spacer" />
-        {isAdmin && (
-          <button className="primary" disabled={busy} onClick={save}>
-            {busy ? "Saving…" : saved ? "Saved" : "Save changes"}
-          </button>
-        )}
       </div>
 
       {!isAdmin && (
@@ -71,7 +83,7 @@ export function SettingsView({
             id="cname"
             disabled={!isAdmin}
             value={org.clinic_name}
-            onChange={(e) => onChange({ ...org, clinic_name: e.target.value })}
+            onChange={(e) => set("clinic_name", e.target.value)}
           />
         </div>
 
@@ -82,7 +94,7 @@ export function SettingsView({
               id="caddr"
               disabled={!isAdmin}
               value={org.address}
-              onChange={(e) => onChange({ ...org, address: e.target.value })}
+              onChange={(e) => set("address", e.target.value)}
             />
           </div>
           <div className="field">
@@ -92,7 +104,7 @@ export function SettingsView({
               disabled={!isAdmin}
               placeholder="Printed on reports if set"
               value={org.registration_no}
-              onChange={(e) => onChange({ ...org, registration_no: e.target.value })}
+              onChange={(e) => set("registration_no", e.target.value)}
             />
           </div>
         </div>
@@ -104,7 +116,7 @@ export function SettingsView({
               id="cphone"
               disabled={!isAdmin}
               value={org.phone}
-              onChange={(e) => onChange({ ...org, phone: e.target.value })}
+              onChange={(e) => set("phone", e.target.value)}
             />
           </div>
           <div className="field">
@@ -113,7 +125,7 @@ export function SettingsView({
               id="cemail"
               disabled={!isAdmin}
               value={org.email}
-              onChange={(e) => onChange({ ...org, email: e.target.value })}
+              onChange={(e) => set("email", e.target.value)}
             />
           </div>
         </div>
@@ -132,10 +144,7 @@ export function SettingsView({
               disabled={!isAdmin}
               value={org.letterhead_mode}
               onChange={(e) =>
-                onChange({
-                  ...org,
-                  letterhead_mode: e.target.value === "full" ? "full" : "preprinted",
-                })
+                set("letterhead_mode", e.target.value === "full" ? "full" : "preprinted")
               }
             >
               <option value="full">App prints the letterhead (blank A4)</option>
@@ -149,9 +158,7 @@ export function SettingsView({
               inputMode="numeric"
               disabled={!isAdmin || org.letterhead_mode !== "preprinted"}
               value={org.preprinted_top_mm}
-              onChange={(e) =>
-                onChange({ ...org, preprinted_top_mm: Number(e.target.value) || 0 })
-              }
+              onChange={(e) => set("preprinted_top_mm", Number(e.target.value) || 0)}
             />
           </div>
         </div>
@@ -170,7 +177,7 @@ export function SettingsView({
               disabled={!isAdmin}
               placeholder="Dr. …"
               value={org.verifier_name}
-              onChange={(e) => onChange({ ...org, verifier_name: e.target.value })}
+              onChange={(e) => set("verifier_name", e.target.value)}
             />
           </div>
           <div className="field">
@@ -180,9 +187,7 @@ export function SettingsView({
               disabled={!isAdmin}
               placeholder="MD Pathology"
               value={org.verifier_qualification}
-              onChange={(e) =>
-                onChange({ ...org, verifier_qualification: e.target.value })
-              }
+              onChange={(e) => set("verifier_qualification", e.target.value)}
             />
           </div>
           <div className="field">
@@ -191,7 +196,7 @@ export function SettingsView({
               id="vnmc"
               disabled={!isAdmin}
               value={org.verifier_nmc}
-              onChange={(e) => onChange({ ...org, verifier_nmc: e.target.value })}
+              onChange={(e) => set("verifier_nmc", e.target.value)}
             />
           </div>
         </div>
@@ -200,7 +205,7 @@ export function SettingsView({
       <div className="card pad mt">
         <div className="toolbar-row" style={{ marginBottom: "var(--s-14)" }}>
           <span className="card-title">Appearance</span>
-          <span className="card-sub">Saved on this computer only</span>
+          <span className="card-sub">This computer only — saved instantly</span>
         </div>
         <div className="row">
           <span style={{ fontSize: "var(--t-body)", color: "var(--text-muted)" }}>
@@ -212,6 +217,40 @@ export function SettingsView({
           </button>
         </div>
       </div>
+
+      {/* Sticky, so the save control is reachable without scrolling back up. */}
+      {isAdmin && (
+        <div className="toolbar">
+          {justSaved ? (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "var(--s-6)",
+                color: "var(--success-fg)",
+                fontWeight: 600,
+              }}
+            >
+              <IconCheck size={15} /> Saved — every computer will use these settings
+            </span>
+          ) : dirty ? (
+            <span style={{ color: "var(--warning-fg)", fontWeight: 600 }}>
+              Unsaved changes
+            </span>
+          ) : (
+            <span style={{ color: "var(--text-faint)" }}>No changes to save</span>
+          )}
+
+          <div className="spacer" />
+
+          <button disabled={!dirty || busy} onClick={onRevert}>
+            Discard
+          </button>
+          <button className="primary" disabled={!dirty || busy} onClick={save}>
+            {busy ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      )}
     </>
   );
 }

@@ -127,6 +127,7 @@ export function App() {
   const [listLoading, setListLoading] = useState(false);
 
   const [org, setOrg] = useState<Organisation>(FALLBACK_ORG);
+  const [savedOrg, setSavedOrg] = useState<Organisation>(FALLBACK_ORG);
 
   const [draft, setDraft] = useState<PatientDraft>(EMPTY_DRAFT);
   const [activePatient, setActivePatient] = useState<Patient | null>(null);
@@ -172,7 +173,10 @@ export function App() {
     setProfile(p);
     if (!p) return;
     const o = await loadOrganisation();
-    if (o) setOrg(o);
+    if (o) {
+      setOrg(o);
+      setSavedOrg(o);
+    }
     await refreshOverview();
   }, [refreshOverview]);
 
@@ -372,13 +376,17 @@ export function App() {
     [profile],
   );
 
-  const saveOrg = useCallback(async () => {
-    if (!profile) return;
+  const saveOrg = useCallback(async (): Promise<boolean> => {
+    if (!profile) return false;
     setBusy(true);
+    setError("");
     try {
       await saveOrganisation(org, profile.id);
+      setSavedOrg(org);
+      return true;
     } catch (e) {
       fail(e);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1038,10 +1046,12 @@ export function App() {
               <SettingsView
                 profile={profile}
                 org={org}
+                savedOrg={savedOrg}
                 theme={theme}
                 busy={busy}
                 onChange={setOrg}
                 onSave={saveOrg}
+                onRevert={() => setOrg(savedOrg)}
                 onToggleTheme={toggleTheme}
               />
             </div>
