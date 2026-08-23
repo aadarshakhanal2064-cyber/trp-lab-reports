@@ -1,0 +1,673 @@
+/* Design tokens — see docs/07-design-system.md.
+   No component below hard-codes a colour or a size. */
+
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #f6f7f9;
+  --bg-sunken: #eef0f3;
+  --border: #d8dce2;
+  --border-strong: #14181d;
+  --text: #14181d;
+  --text-muted: #5a6470;
+  --brand: #1b27a8;
+  --brand-weak: #eceef9;
+  --focus-ring: #1b27a8;
+
+  --flag-high: #b42318;
+  --flag-low: #1b5fb4;
+  --critical-bg: #fef0ef;
+  --critical-border: #b42318;
+  --ok: #1f7a44;
+  --warn: #9a6400;
+  --warn-bg: #fdf6e7;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-sm: 3px;
+  --radius-md: 5px;
+
+  --duration-fast: 120ms;
+
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", "Noto Sans Devanagari", sans-serif;
+
+  /* Print geometry */
+  --print-top-reserve: 0mm;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- */
+/* App chrome                                                        */
+/* ---------------------------------------------------------------- */
+
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-5) var(--space-8);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.brandmark {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--brand);
+}
+
+.brandsub {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.demo-badge {
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  font-weight: 600;
+}
+
+h1 {
+  font-size: var(--text-xl);
+  margin: 0 0 var(--space-1);
+}
+
+h2 {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-3);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---------------------------------------------------------------- */
+/* Controls                                                          */
+/* ---------------------------------------------------------------- */
+
+button {
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.12);
+  background: var(--brand);
+}
+
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+
+input:disabled {
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+label {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.field {
+  margin-bottom: var(--space-3);
+}
+
+.grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.grid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.grid.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.grid.cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.toolbar {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  padding: var(--space-3) 0;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------- */
+/* Patient list                                                      */
+/* ---------------------------------------------------------------- */
+
+.list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+.list-item:last-child {
+  border-bottom: none;
+}
+
+.list-item .name {
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.empty {
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---------------------------------------------------------------- */
+/* Result entry grid                                                 */
+/* ---------------------------------------------------------------- */
+
+.entry-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.entry-table th {
+  text-align: left;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.entry-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--bg-sunken);
+  vertical-align: middle;
+}
+
+.entry-table tr.group td {
+  background: var(--bg-subtle);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: var(--space-2);
+}
+
+.entry-table tr.critical td {
+  background: var(--critical-bg);
+}
+
+.analyte-name {
+  font-weight: 500;
+}
+
+.analyte-method {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding-left: var(--space-3);
+}
+
+.value-cell {
+  width: 130px;
+}
+
+.flag {
+  display: inline-block;
+  min-width: 14px;
+  font-weight: 700;
+  font-size: var(--text-xs);
+  margin-left: var(--space-1);
+}
+
+.flag.h {
+  color: var(--flag-high);
+}
+
+.flag.l {
+  color: var(--flag-low);
+}
+
+.derived {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.range-cell {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: pre-line;
+}
+
+.unit-cell {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  width: 90px;
+}
+
+.pill {
+  font-size: var(--text-xs);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.pill.on {
+  background: var(--brand-weak);
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.banner {
+  border: 1px solid var(--critical-border);
+  background: var(--critical-bg);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
+}
+
+.notice {
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-bottom: var(--space-4);
+}
+
+/* ---------------------------------------------------------------- */
+/* The printed report                                                */
+/* ---------------------------------------------------------------- */
+
+.sheet {
+  background: #fff;
+  color: #000;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 12mm 15mm;
+  border: 1px solid var(--border);
+  font-size: 10pt;
+  line-height: 1.35;
+}
+
+.sheet .top-reserve {
+  height: var(--print-top-reserve);
+}
+
+.lh {
+  text-align: center;
+  border-bottom: 1.5pt solid #000;
+  padding-bottom: 3mm;
+  margin-bottom: 4mm;
+}
+
+.lh-logo {
+  height: 16mm;
+  width: auto;
+  margin-bottom: 2mm;
+}
+
+.lh-name {
+  font-size: 15pt;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.lh-sub {
+  font-size: 9pt;
+}
+
+.pt-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 8mm;
+  font-size: 9.5pt;
+  margin-bottom: 3mm;
+}
+
+.pt-head .k {
+  display: inline-block;
+  width: 26mm;
+  font-weight: 700;
+}
+
+.dept-band {
+  text-align: center;
+  font-weight: 700;
+  font-size: 11pt;
+  letter-spacing: 0.08em;
+  border-top: 1pt solid #000;
+  border-bottom: 1pt solid #000;
+  padding: 1mm 0;
+  margin: 3mm 0 0;
+}
+
+.rep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9.5pt;
+}
+
+.rep-table th {
+  text-align: left;
+  font-size: 9.5pt;
+  font-weight: 700;
+  border-bottom: 0.8pt solid #000;
+  padding: 1mm 1mm;
+}
+
+.rep-table td {
+  padding: 0.9mm 1mm;
+  vertical-align: top;
+}
+
+.rep-table tr {
+  break-inside: avoid;
+}
+
+.rep-table .col-test {
+  width: 46%;
+}
+
+.rep-table .col-result {
+  width: 16%;
+}
+
+.rep-table .col-unit {
+  width: 14%;
+}
+
+.rep-table .col-ref {
+  width: 24%;
+}
+
+.rep-panel-title {
+  font-weight: 700;
+  padding-top: 2mm;
+  break-after: avoid;
+}
+
+.rep-group {
+  font-weight: 700;
+  padding-top: 1.5mm;
+  break-after: avoid;
+}
+
+.rep-method {
+  display: block;
+  padding-left: 4mm;
+  font-size: 8pt;
+}
+
+.rep-ref {
+  white-space: pre-line;
+  font-size: 8.5pt;
+}
+
+.rep-flag {
+  font-weight: 700;
+  padding-left: 1.5mm;
+}
+
+.rep-footer-field {
+  font-size: 8.5pt;
+  padding-top: 1.5mm;
+}
+
+.rep-note {
+  font-size: 8.5pt;
+  margin-top: 3mm;
+  break-inside: avoid;
+}
+
+/* Screen: hidden. Print: fixed elements repeat on every page in Chrome. */
+.running-footer {
+  display: none;
+}
+
+.end-of-report {
+  text-align: center;
+  font-weight: 700;
+  font-size: 9.5pt;
+  margin-top: 5mm;
+}
+
+.sig-block {
+  margin-top: 12mm;
+  text-align: right;
+  font-size: 9pt;
+  break-inside: avoid;
+}
+
+.sig-line {
+  display: inline-block;
+  border-top: 0.8pt solid #000;
+  padding-top: 1mm;
+  min-width: 55mm;
+  text-align: center;
+}
+
+.unverified {
+  font-size: 8pt;
+  text-align: center;
+  margin-top: 4mm;
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------- */
+/* Print                                                             */
+/* ---------------------------------------------------------------- */
+
+@page {
+  size: A4 portrait;
+  margin: 12mm 15mm;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #print-root,
+  #print-root * {
+    visibility: visible;
+  }
+
+  #print-root {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+
+  .sheet {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .running-footer {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    font-size: 7.5pt;
+    text-align: right;
+    border-top: 0.4pt solid #000;
+    padding-top: 1mm;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
