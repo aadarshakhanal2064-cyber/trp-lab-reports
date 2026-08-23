@@ -23,7 +23,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   }
 
   return (
-    <div className="app" style={{ maxWidth: "420px", paddingTop: "var(--space-8)" }}>
+    <div className="auth-page"><div className="auth-box">
       <div style={{ marginBottom: "var(--space-6)" }}>
         <div className="brandmark">TRP Lab Reports</div>
         <div className="brandsub">Tandi Ratnanagar Polyclinic · Pathology</div>
@@ -72,6 +72,6 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
         No account? An administrator creates accounts for staff. Passwords are never
         shared between people — the audit trail depends on knowing who did what.
       </p>
-    </div>
+    </div></div>
   );
 }
