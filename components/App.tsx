@@ -1,33 +1,38 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PANELS, PANEL_BY_ID } from "@/lib/catalog";
+import { PANELS, PANEL_BY_ID, analytesOf } from "@/lib/catalog";
 import { computeAll, enteredCount } from "@/lib/compute";
-import { dualDate, toAd, toBs } from "@/lib/dates";
+import {
+  audit,
+  createOrder,
+  createPatient,
+  findDuplicates,
+  getProfile,
+  nextAccessionDb,
+  recentReports,
+  releaseReport,
+  saveResults,
+  searchPatientsDb,
+  signOut,
+  type Profile,
+} from "@/lib/db";
+import { currentBsYear, dualDate, toAd, toBs } from "@/lib/dates";
 import { isCritical } from "@/lib/ranges";
 import {
   DEFAULT_SETTINGS,
-  loadPatients,
-  loadReports,
   loadSettings,
-  newId,
-  nextAccession,
-  nextMrn,
-  savePatients,
-  saveReports,
   saveSettings,
-  searchPatients,
   type Settings,
 } from "@/lib/storage";
 import type { Panel, Patient, ReportRecord, Sex } from "@/lib/types";
+import { Login } from "./Login";
 import { ReportSheet } from "./ReportSheet";
 import { ResultEntry } from "./ResultEntry";
 
 type View = "home" | "patient" | "order" | "entry" | "preview" | "settings";
 
-const EMPTY_PATIENT: Patient = {
-  id: "",
-  mrn: "",
+const EMPTY_PATIENT: Omit<Patient, "id" | "mrn"> = {
   fullName: "",
   sex: "M",
   ageYears: 0,
@@ -36,44 +41,84 @@ const EMPTY_PATIENT: Patient = {
   referredBy: "",
 };
 
+/** Which panel an analyte belongs to — needed when writing results. */
+const PANEL_OF_ANALYTE = new Map<string, string>();
+for (const p of PANELS) {
+  for (const a of analytesOf(p)) PANEL_OF_ANALYTE.set(a.id, p.id);
+}
+
 export function App() {
-  const [ready, setReady] = useState(false);
+  const [booting, setBooting] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [view, setView] = useState<View>("home");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
 
   const [query, setQuery] = useState("");
-  const [draftPatient, setDraftPatient] = useState<Patient>(EMPTY_PATIENT);
+  const [draft, setDraft] = useState(EMPTY_PATIENT);
+  const [duplicates, setDuplicates] = useState<Patient[]>([]);
   const [activePatient, setActivePatient] = useState<Patient | null>(null);
 
   const [panelIds, setPanelIds] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
   const [accession, setAccession] = useState("");
+  const [orderId, setOrderId] = useState("");
   const [sampleDateISO, setSampleDateISO] = useState("");
   const [criticalAcknowledged, setCriticalAcknowledged] = useState(false);
+  const [releasedVersion, setReleasedVersion] = useState(0);
 
-  /* Load once on mount — localStorage is not available during SSR. */
+  const refresh = useCallback(async () => {
+    const [found, recent] = await Promise.all([
+      searchPatientsDb(query),
+      recentReports(),
+    ]);
+    setPatients(found);
+    setReports(recent);
+  }, [query]);
+
   useEffect(() => {
-    setPatients(loadPatients());
-    setReports(loadReports());
-    setSettings(loadSettings());
-    setReady(true);
+    (async () => {
+      try {
+        const p = await getProfile();
+        setProfile(p);
+        setSettings(loadSettings());
+        if (p) await refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Startup failed.");
+      } finally {
+        setBooting(false);
+      }
+    })();
+    // Runs once on mount; refresh is re-invoked explicitly elsewhere.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* Debounced patient search. */
   useEffect(() => {
-    if (ready) savePatients(patients);
-  }, [patients, ready]);
+    if (!profile) return;
+    const t = setTimeout(() => {
+      searchPatientsDb(query).then(setPatients).catch(() => undefined);
+    }, 200);
+    return () => clearTimeout(t);
+  }, [query, profile]);
 
   useEffect(() => {
-    if (ready) saveReports(reports);
-  }, [reports, ready]);
+    saveSettings(settings);
+  }, [settings]);
 
+  /* Duplicate check while typing a new patient's name. */
   useEffect(() => {
-    if (ready) saveSettings(settings);
-  }, [settings, ready]);
+    if (view !== "patient") return;
+    const t = setTimeout(() => {
+      findDuplicates(draft.fullName).then(setDuplicates).catch(() => undefined);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [draft.fullName, view]);
 
   const selectedPanels = useMemo(
     () =>
@@ -98,80 +143,118 @@ export function App() {
     [selectedPanels, values],
   );
 
-  const filtered = useMemo(() => searchPatients(patients, query), [patients, query]);
+  const fail = (e: unknown) =>
+    setError(e instanceof Error ? e.message : "Something went wrong.");
 
   /* ---------------------------------------------------------------- */
 
-  const startNewPatient = useCallback(() => {
-    setDraftPatient({ ...EMPTY_PATIENT, id: newId(), mrn: nextMrn(patients) });
-    setView("patient");
-  }, [patients]);
-
-  const savePatient = useCallback(() => {
-    const patient = { ...draftPatient, fullName: draftPatient.fullName.trim() };
-    setPatients((prev) => {
-      const exists = prev.some((p) => p.id === patient.id);
-      return exists ? prev.map((p) => (p.id === patient.id ? patient : p)) : [patient, ...prev];
-    });
+  const beginOrder = useCallback((patient: Patient) => {
     setActivePatient(patient);
     setPanelIds([]);
+    setValues({});
+    setComments({});
+    setOrderId("");
+    setReleasedVersion(0);
+    setCriticalAcknowledged(false);
+    setSampleDateISO(new Date().toISOString());
+    setError("");
     setView("order");
-  }, [draftPatient]);
+  }, []);
 
-  const beginOrder = useCallback(
-    (patient: Patient) => {
-      setActivePatient(patient);
-      setPanelIds([]);
-      setValues({});
-      setComments({});
-      setCriticalAcknowledged(false);
-      setAccession(nextAccession(reports));
-      setSampleDateISO(new Date().toISOString());
-      setView("order");
+  const savePatientAndOrder = useCallback(async () => {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      const saved = await createPatient(draft, profile.id);
+      await refresh();
+      beginOrder(saved);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }, [draft, profile, refresh, beginOrder]);
+
+  const startEntry = useCallback(async () => {
+    if (!profile || !activePatient) return;
+    setBusy(true);
+    try {
+      const acc = await nextAccessionDb(currentBsYear());
+      const id = await createOrder(activePatient.id, panelIds, acc, profile.id);
+      setAccession(acc);
+      setOrderId(id);
+      setView("entry");
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }, [profile, activePatient, panelIds]);
+
+  const goToPreview = useCallback(async () => {
+    if (!profile || !orderId) return;
+    setBusy(true);
+    try {
+      await saveResults(
+        orderId,
+        values,
+        (a) => PANEL_OF_ANALYTE.get(a) ?? "",
+        profile.id,
+      );
+      setView("preview");
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }, [profile, orderId, values]);
+
+  const doRelease = useCallback(async () => {
+    if (!profile || !orderId) return;
+    setBusy(true);
+    try {
+      const v = await releaseReport(
+        orderId,
+        values,
+        comments,
+        {
+          name: settings.verifierName,
+          qualification: settings.verifierQualification,
+          nmc: settings.verifierNmc,
+        },
+        settings.letterheadMode,
+        profile.id,
+      );
+      setReleasedVersion(v);
+      await refresh();
+      window.print();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }, [profile, orderId, values, comments, settings, refresh]);
+
+  const openReport = useCallback(
+    async (record: ReportRecord) => {
+      setActivePatient(record.patientSnapshot);
+      setPanelIds(record.panelIds);
+      setValues(record.values);
+      setComments(record.comments);
+      setAccession(record.accession);
+      setOrderId(record.id);
+      setSampleDateISO(record.sampleDateISO);
+      setCriticalAcknowledged(true);
+      setReleasedVersion(record.status === "released" ? 1 : 0);
+      setView("preview");
+      if (profile) await audit(profile.id, "report.view", "lab_order", record.id);
     },
-    [reports],
+    [profile],
   );
 
-  const togglePanel = useCallback((id: string) => {
-    setPanelIds((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
-    );
-  }, []);
+  /* ---------------------------------------------------------------- */
 
-  const saveReport = useCallback(() => {
-    if (!activePatient) return;
-    const now = new Date().toISOString();
-    const record: ReportRecord = {
-      id: newId(),
-      accession,
-      patientId: activePatient.id,
-      patientSnapshot: activePatient,
-      panelIds,
-      values,
-      comments,
-      sampleDateISO,
-      reportDateISO: now,
-      createdAtISO: now,
-      status: "released",
-      verifierName: settings.verifierName,
-      verifierQualification: settings.verifierQualification,
-      verifierNmc: settings.verifierNmc,
-    };
-    setReports((prev) => [record, ...prev]);
-  }, [activePatient, accession, panelIds, values, comments, sampleDateISO, settings]);
-
-  const openReport = useCallback((record: ReportRecord) => {
-    setActivePatient(record.patientSnapshot);
-    setPanelIds(record.panelIds);
-    setValues(record.values);
-    setComments(record.comments);
-    setAccession(record.accession);
-    setSampleDateISO(record.sampleDateISO);
-    setCriticalAcknowledged(true);
-    setView("preview");
-  }, []);
-
-  if (!ready) {
+  if (booting) {
     return (
       <div className="app">
         <p className="muted">Loading…</p>
@@ -179,7 +262,26 @@ export function App() {
     );
   }
 
-  /* ---------------------------------------------------------------- */
+  if (!profile) {
+    return (
+      <Login
+        onSignedIn={async () => {
+          setBooting(true);
+          try {
+            const p = await getProfile();
+            setProfile(p);
+            if (p) await refresh();
+          } catch (e) {
+            fail(e);
+          } finally {
+            setBooting(false);
+          }
+        }}
+      />
+    );
+  }
+
+  const canRelease = profile.can_release || profile.role === "admin";
 
   return (
     <div className="app">
@@ -189,14 +291,38 @@ export function App() {
           <div className="brandsub">Tandi Ratnanagar Polyclinic · Pathology</div>
         </div>
         <div className="spacer" />
-        <span className="demo-badge">DEMO — not for clinical use</span>
+        <span className="pill on">
+          {profile.full_name} · {profile.role}
+        </span>
         <button className="ghost" onClick={() => setView("home")}>
           Home
         </button>
         <button className="ghost" onClick={() => setView("settings")}>
           Settings
         </button>
+        <button
+          className="ghost"
+          onClick={async () => {
+            await signOut();
+            setProfile(null);
+          }}
+        >
+          Sign out
+        </button>
       </header>
+
+      {error && (
+        <div className="banner no-print" role="alert">
+          <strong>{error}</strong>
+          <button
+            className="ghost"
+            style={{ marginLeft: "var(--space-3)" }}
+            onClick={() => setError("")}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {view === "home" && (
         <section className="no-print">
@@ -214,25 +340,34 @@ export function App() {
               aria-label="Search patients"
               style={{ maxWidth: "420px" }}
             />
-            <button className="primary" onClick={startNewPatient}>
+            <button
+              className="primary"
+              onClick={() => {
+                setDraft(EMPTY_PATIENT);
+                setDuplicates([]);
+                setError("");
+                setView("patient");
+              }}
+            >
               + New patient
             </button>
           </div>
 
           <div className="list">
-            {filtered.length === 0 ? (
+            {patients.length === 0 ? (
               <div className="empty">
-                {patients.length === 0
-                  ? "No patients yet. Add one to generate your first report."
-                  : "No patient matches that search."}
+                {query
+                  ? "No patient matches that search."
+                  : "No patients yet. Add one to generate your first report."}
               </div>
             ) : (
-              filtered.map((p) => (
+              patients.map((p) => (
                 <button className="list-item" key={p.id} onClick={() => beginOrder(p)}>
                   <div style={{ flex: 1 }}>
                     <div className="name">{p.fullName}</div>
                     <div className="muted">
-                      MRN {p.mrn} · {p.sex === "M" ? "Male" : p.sex === "F" ? "Female" : "Other"} /{" "}
+                      MRN {p.mrn} ·{" "}
+                      {p.sex === "M" ? "Male" : p.sex === "F" ? "Female" : "Other"} /{" "}
                       {p.ageYears} yrs{p.phone ? ` · ${p.phone}` : ""}
                     </div>
                   </div>
@@ -245,21 +380,21 @@ export function App() {
           <h2 style={{ marginTop: "var(--space-8)" }}>Recent reports</h2>
           <div className="list">
             {reports.length === 0 ? (
-              <div className="empty">No reports generated yet.</div>
+              <div className="empty">No reports yet.</div>
             ) : (
-              reports.slice(0, 12).map((r) => (
+              reports.map((r) => (
                 <button className="list-item" key={r.id} onClick={() => openReport(r)}>
                   <div style={{ flex: 1 }}>
                     <div className="name">{r.patientSnapshot.fullName}</div>
                     <div className="muted">
                       {r.accession} ·{" "}
-                      {r.panelIds
-                        .map((id) => PANEL_BY_ID.get(id)?.title ?? id)
-                        .join(", ")}{" "}
-                      · {toBs(r.reportDateISO)} BS
+                      {r.panelIds.map((id) => PANEL_BY_ID.get(id)?.title ?? id).join(", ")}{" "}
+                      · {toBs(r.sampleDateISO)} BS
                     </div>
                   </div>
-                  <span className="pill">Reprint →</span>
+                  <span className="pill">
+                    {r.status === "released" ? "Released" : "Draft"}
+                  </span>
                 </button>
               ))
             )}
@@ -271,7 +406,7 @@ export function App() {
         <section className="no-print">
           <h1>New patient</h1>
           <p className="muted" style={{ marginBottom: "var(--space-4)" }}>
-            MRN {draftPatient.mrn} · assigned automatically
+            A registration number is assigned automatically on save.
           </p>
 
           <div className="card">
@@ -280,21 +415,17 @@ export function App() {
               <input
                 id="pname"
                 autoFocus
-                value={draftPatient.fullName}
-                onChange={(e) =>
-                  setDraftPatient({ ...draftPatient, fullName: e.target.value })
-                }
+                value={draft.fullName}
+                onChange={(e) => setDraft({ ...draft, fullName: e.target.value })}
               />
-              {draftPatient.fullName.trim().length > 2 &&
-                patients.some(
-                  (p) =>
-                    p.id !== draftPatient.id &&
-                    p.fullName.toLowerCase() === draftPatient.fullName.trim().toLowerCase(),
-                ) && (
-                  <p className="muted" style={{ color: "var(--warn)" }}>
-                    A patient with this name already exists. Check before continuing.
-                  </p>
-                )}
+              {duplicates.length > 0 && (
+                <p className="muted" style={{ color: "var(--warn)" }}>
+                  {duplicates.length} existing patient
+                  {duplicates.length > 1 ? "s" : ""} with this name (
+                  {duplicates.map((d) => `MRN ${d.mrn}, ${d.ageYears}y`).join("; ")}). Check
+                  before continuing.
+                </p>
+              )}
             </div>
 
             <div className="grid cols-3">
@@ -302,40 +433,31 @@ export function App() {
                 <label htmlFor="psex">Sex</label>
                 <select
                   id="psex"
-                  value={draftPatient.sex}
-                  onChange={(e) =>
-                    setDraftPatient({ ...draftPatient, sex: e.target.value as Sex })
-                  }
+                  value={draft.sex}
+                  onChange={(e) => setDraft({ ...draft, sex: e.target.value as Sex })}
                 >
                   <option value="M">Male</option>
                   <option value="F">Female</option>
                   <option value="O">Other</option>
                 </select>
               </div>
-
               <div className="field">
                 <label htmlFor="page">Age (years)</label>
                 <input
                   id="page"
                   inputMode="numeric"
-                  value={draftPatient.ageYears === 0 ? "" : draftPatient.ageYears}
+                  value={draft.ageYears === 0 ? "" : draft.ageYears}
                   onChange={(e) =>
-                    setDraftPatient({
-                      ...draftPatient,
-                      ageYears: Number(e.target.value) || 0,
-                    })
+                    setDraft({ ...draft, ageYears: Number(e.target.value) || 0 })
                   }
                 />
               </div>
-
               <div className="field">
                 <label htmlFor="pphone">Phone</label>
                 <input
                   id="pphone"
-                  value={draftPatient.phone ?? ""}
-                  onChange={(e) =>
-                    setDraftPatient({ ...draftPatient, phone: e.target.value })
-                  }
+                  value={draft.phone ?? ""}
+                  onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
                 />
               </div>
             </div>
@@ -346,10 +468,8 @@ export function App() {
                 <input
                   id="paddr"
                   placeholder="Ratnanagar-2, Chitwan"
-                  value={draftPatient.address ?? ""}
-                  onChange={(e) =>
-                    setDraftPatient({ ...draftPatient, address: e.target.value })
-                  }
+                  value={draft.address ?? ""}
+                  onChange={(e) => setDraft({ ...draft, address: e.target.value })}
                 />
               </div>
               <div className="field">
@@ -357,10 +477,8 @@ export function App() {
                 <input
                   id="pref"
                   placeholder="Dr. …"
-                  value={draftPatient.referredBy ?? ""}
-                  onChange={(e) =>
-                    setDraftPatient({ ...draftPatient, referredBy: e.target.value })
-                  }
+                  value={draft.referredBy ?? ""}
+                  onChange={(e) => setDraft({ ...draft, referredBy: e.target.value })}
                 />
               </div>
             </div>
@@ -371,17 +489,10 @@ export function App() {
             <div className="spacer" />
             <button
               className="primary"
-              disabled={draftPatient.fullName.trim() === "" || draftPatient.ageYears <= 0}
-              onClick={() => {
-                setAccession(nextAccession(reports));
-                setSampleDateISO(new Date().toISOString());
-                setValues({});
-                setComments({});
-                setCriticalAcknowledged(false);
-                savePatient();
-              }}
+              disabled={busy || draft.fullName.trim() === "" || draft.ageYears <= 0}
+              onClick={savePatientAndOrder}
             >
-              Save &amp; choose tests →
+              {busy ? "Saving…" : "Save & choose tests →"}
             </button>
           </div>
         </section>
@@ -392,8 +503,8 @@ export function App() {
           <h1>Choose tests</h1>
           <p className="muted" style={{ marginBottom: "var(--space-4)" }}>
             {activePatient.fullName} · MRN {activePatient.mrn} ·{" "}
-            {activePatient.sex === "M" ? "Male" : activePatient.sex === "F" ? "Female" : "Other"} /{" "}
-            {activePatient.ageYears} yrs · {accession}
+            {activePatient.sex === "M" ? "Male" : activePatient.sex === "F" ? "Female" : "Other"}{" "}
+            / {activePatient.ageYears} yrs
           </p>
 
           <div className="grid cols-2">
@@ -402,7 +513,13 @@ export function App() {
               return (
                 <button
                   key={panel.id}
-                  onClick={() => togglePanel(panel.id)}
+                  onClick={() =>
+                    setPanelIds((prev) =>
+                      prev.includes(panel.id)
+                        ? prev.filter((x) => x !== panel.id)
+                        : [...prev, panel.id],
+                    )
+                  }
                   aria-pressed={on}
                   style={{
                     textAlign: "left",
@@ -426,10 +543,10 @@ export function App() {
             <span className="muted">{panelIds.length} selected</span>
             <button
               className="primary"
-              disabled={panelIds.length === 0}
-              onClick={() => setView("entry")}
+              disabled={busy || panelIds.length === 0}
+              onClick={startEntry}
             >
-              Enter results →
+              {busy ? "Creating order…" : "Enter results →"}
             </button>
           </div>
         </section>
@@ -440,8 +557,8 @@ export function App() {
           <h1>Enter results</h1>
           <p className="muted" style={{ marginBottom: "var(--space-4)" }}>
             {activePatient.fullName} ·{" "}
-            {activePatient.sex === "M" ? "Male" : activePatient.sex === "F" ? "Female" : "Other"} /{" "}
-            {activePatient.ageYears} yrs · {accession} · Sample {toBs(sampleDateISO)} BS
+            {activePatient.sex === "M" ? "Male" : activePatient.sex === "F" ? "Female" : "Other"}{" "}
+            / {activePatient.ageYears} yrs · {accession} · Sample {toBs(sampleDateISO)} BS
           </p>
 
           {criticals.length > 0 && (
@@ -499,13 +616,10 @@ export function App() {
             </span>
             <button
               className="primary"
-              disabled={criticals.length > 0 && !criticalAcknowledged}
-              onClick={() => {
-                saveReport();
-                setView("preview");
-              }}
+              disabled={busy || (criticals.length > 0 && !criticalAcknowledged)}
+              onClick={goToPreview}
             >
-              Preview &amp; print →
+              {busy ? "Saving…" : "Save & preview →"}
             </button>
           </div>
         </section>
@@ -530,9 +644,23 @@ export function App() {
                 {settings.letterheadMode === "full" ? "Printed by app" : "Preprinted paper"}
               </button>
               <div className="spacer" />
-              <button className="primary" onClick={() => window.print()}>
-                Print / Save as PDF
-              </button>
+              {releasedVersion > 0 ? (
+                <>
+                  <span className="pill on">Released v{releasedVersion}</span>
+                  <button className="primary" onClick={() => window.print()}>
+                    Reprint
+                  </button>
+                </>
+              ) : canRelease ? (
+                <button className="primary" disabled={busy} onClick={doRelease}>
+                  {busy ? "Releasing…" : "Release & print"}
+                </button>
+              ) : (
+                <span className="muted">
+                  You do not have permission to release reports. A verifier must
+                  release this.
+                </span>
+              )}
             </div>
           </div>
 
@@ -554,6 +682,12 @@ export function App() {
       {view === "settings" && (
         <section className="no-print">
           <h1>Settings</h1>
+
+          <div className="notice">
+            These settings are stored in this browser only, so each computer needs
+            them set once. Moving them into the database is a later phase.
+          </div>
+
           <div className="card">
             <h2>Clinic</h2>
             <div className="field">
@@ -665,27 +799,12 @@ export function App() {
           </div>
 
           <div className="card">
-            <h2>Data</h2>
+            <h2>Account</h2>
             <p className="muted">
-              This demo stores everything in this browser on this computer only. Nothing
-              is sent anywhere. Clearing your browser data will erase it. Today is{" "}
+              Signed in as {profile.full_name} ({profile.role}
+              {canRelease ? ", can release reports" : ""}). Today is{" "}
               {toAd(new Date().toISOString())} AD.
             </p>
-            <button
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Erase all demo patients and reports from this browser? This cannot be undone.",
-                  )
-                ) {
-                  setPatients([]);
-                  setReports([]);
-                  setView("home");
-                }
-              }}
-            >
-              Erase all demo data
-            </button>
           </div>
         </section>
       )}
