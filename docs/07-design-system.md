@@ -1,308 +1,163 @@
 # 07 — Design System
 
+> **Source of truth:** `design_handoff_trp_lab_console/README.md` for the spec,
+> and `app/globals.css` for the implementation. The working rules a developer
+> needs day to day are in [`CLAUDE.md`](../CLAUDE.md) §1.
+>
+> This document covers the parts that are *not* in the handoff: interaction
+> design, the keyboard map, print layout and accessibility. Where it and the
+> handoff disagree, the handoff wins.
+
+---
+
 ## 1. Design principles
 
 **Dense, calm, clinical.** This is a tool people use for eight hours, not a
-marketing site. Information density is a feature. Whitespace that would look
-elegant on a landing page is wasted screen on a lab bench.
+marketing site. Information density is a feature.
 
-**Keyboard first, mouse never required.** Lab technicians are fast typists. Every
-high-frequency action has a key. If a flow can only be completed with a mouse, it
-is a bug.
+**Keyboard first, mouse never required.** Lab technicians are fast typists. If a
+high-frequency flow can only be completed with a mouse, that is a bug.
 
-**Quiet by default, loud when it matters.** The interface should be visually
-uneventful so that an out-of-range value and a critical value stand out
-immediately. This is why there is no decorative colour and no animation.
+**Quiet by default, loud when it matters.** The interface is visually uneventful
+so that an out-of-range value and a critical value stand out immediately. This
+is why there is no decorative colour and no animation.
 
 **Designed for the bad states.** Offline, half-entered, printer jammed, wrong
-patient selected, power just came back. These are designed screens, not
-afterthoughts.
+patient selected, power just came back.
 
 ---
 
-## 2. Design tokens
+## 2. Tokens
 
-No hard-coded hex values or magic pixel numbers anywhere in a component. A lint
-rule enforces this — see `09-quality-gates.md`.
+Implemented in `app/globals.css`, matched to the handoff. Summarised in
+`CLAUDE.md` §1 so it is loaded every session. Not repeated here — a third copy
+would only drift.
 
-### Colour
-
-Deliberately restrained. Colour carries meaning here; it is not decoration.
-
-| Token | Light | Purpose |
-|---|---|---|
-| `--bg` | `#FFFFFF` | Page |
-| `--bg-subtle` | `#F6F7F9` | Table stripes, panel backgrounds |
-| `--border` | `#D8DCE2` | Rules and dividers |
-| `--text` | `#14181D` | Primary text |
-| `--text-muted` | `#5A6470` | Labels, units, secondary |
-| `--brand` | `#1B27A8` | From the clinic logo blue. Used for focus and primary actions only. |
-| `--focus-ring` | `#1B27A8` | 2px, always visible, never removed |
-| `--flag-high` | `#B42318` | H marker |
-| `--flag-low` | `#1B5FB4` | L marker |
-| `--flag-critical-bg` | `#FEF0EF` | Critical value row background |
-| `--ok` | `#1F7A44` | Released, saved, synced |
-| `--warn` | `#9A6400` | Offline, unsaved, pending |
-
-All pairings verified at **WCAG AA 4.5:1** minimum, checked automatically in CI.
-A dark theme is not in v1 — a lab is a bright room and it is scope we do not need.
-
-> Note: `--brand` is taken from the logo's blue. If the vector logo (question A3)
-> reveals a different official blue, this token changes in one place.
-
-### Type
-
-System font stack for speed — no web font download on first load, which matters on
-a clinic connection. Devanagari-capable fonts are embedded for **print** from day
-one.
-
-| Token | Size / line | Use |
-|---|---|---|
-| `--text-xs` | 12 / 16 | Units, methods, table meta |
-| `--text-sm` | 13 / 18 | **Default for dense tables** |
-| `--text-base` | 15 / 22 | Forms, body |
-| `--text-lg` | 18 / 26 | Section headings |
-| `--text-xl` | 22 / 30 | Page titles |
-
-Tabular figures are enabled everywhere numbers appear, so digits align in columns.
-
-### Spacing, radius, elevation
-
-4px base scale: `--space-1` 4px through `--space-8` 32px.
-Radii: `--radius-sm` 3px, `--radius-md` 5px. Nothing rounder — this is not a
-consumer app.
-Two shadows only: `--shadow-popover` and `--shadow-modal`. Everything else is flat.
-
-### Motion
-
-`--duration-fast` 120ms for focus and hover only. **No entrance animations, no
-skeleton shimmer, no page transitions.** Motion costs frames on a 4 GB PC and
-costs attention on a busy day. `prefers-reduced-motion` removes what little remains.
+The one addition beyond the handoff is the **data-viz series palette**
+(`--series-1/2/3`), validated for colour-vision deficiency. See §6.
 
 ---
 
-## 3. Component inventory
+## 3. Wireframe — Result entry (the screen that matters most)
 
-Built once, documented with every state, used everywhere.
-
-**Inputs:** TextField, NumberField (tabular figures, unit suffix), Select,
-Combobox (type-ahead, keyboard), PicklistWithOverride (for urine/stool),
-DateField (BS + AD dual, see below), Textarea, Checkbox, RadioGroup.
-
-**Data:** DataTable (dense, keyboard-navigable, sticky header), ResultGrid (the
-specialised result-entry grid), DefinitionList (patient header), Badge, FlagMarker.
-
-**Feedback:** Toast, InlineError, EmptyState, LoadingRow, ConfirmDialog,
-CriticalValueDialog, OfflineBanner, SyncStatus.
-
-**Layout:** AppShell, PageHeader, Toolbar, Modal, Drawer, Tabs, SplitPane.
-
-**Every component ships with:** default, hover, focus, active, disabled, error,
-loading and empty states, plus a keyboard interaction spec and an accessibility
-note. A component without all of these does not count as done.
-
-### The BS/AD date field
-
-Deserves its own note because it is where Nepali software usually goes wrong.
-
-- One field, two calendars. Type `2082-05-07` or `2025-08-23`; the format is
-  detected from the year.
-- The other calendar shows in muted text beneath as you type.
-- A picker opens on `F4`, defaults to BS, toggles with `Ctrl+B`.
-- Conversion uses a maintained library — **never hand-rolled**, and covered by
-  tests against known date pairs spanning the full supported range.
-- Internally, everything is stored as an AD timestamp. BS is a display format,
-  never a storage format. This one decision prevents an entire category of bug.
-
----
-
-## 4. Wireframe A — Patient registration
-
-Target: registered in under 30 seconds, no mouse.
-
-```
-┌─ New Patient ──────────────────────────────── [Esc] Cancel ──┐
-│                                                               │
-│  Full name *        [ Ram Bahadur Thapa____________ ]         │
-│                     ⚠ 2 similar patients exist  [F2] review   │
-│                                                               │
-│  Sex *   ( ) Male  ( ) Female  ( ) Other      Alt+M / Alt+F    │
-│                                                               │
-│  Age *   [ 45 ] years    or   DOB [ ____-__-__ ]  BS ⇄ AD     │
-│                                                               │
-│  Phone            [ 98XXXXXXXX_____ ]                         │
-│  Referred by      [ Dr. ____________ ▾ ]  type to search      │
-│                                                               │
-│  ── Address ─────────────────────────────────────────────     │
-│  Province [ Bagmati ▾ ]  District [ Chitwan ▾ ]               │
-│  Municipality [ Ratnanagar ▾ ]  Ward [ 2 ]                    │
-│  (pre-filled — Tab straight past)                             │
-│                                                               │
-│  ───────────────────────────────────────────────────────      │
-│         [ Ctrl+S  Save ]   [ Ctrl+Enter  Save & New Order ]   │
-└───────────────────────────────────────────────────────────────┘
-```
-
-**Notes.** Address defaults to Chitwan/Ratnanagar so the common case is four
-keystrokes. Duplicate warning appears inline as the name is typed — it warns, it
-never blocks. `Ctrl+Enter` goes straight into ordering, which is the real path
-90% of the time.
-
----
-
-## 5. Wireframe B — Result entry (the most important screen)
-
-Target: full CBC in under 90 seconds, no mouse.
+Target: a full CBC in under 90 seconds, no mouse.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ ← TRP-2082-000418   Ram Bahadur Thapa   M / 45y   MRN 10294               │
-│   Sample: 2082-05-07 09:14    Ref: Dr. S. Adhikari      ● Offline — queued│
+│ Enter results                                                             │
+│ Ram Bahadur Thapa · MRN 10294 · Male / 45 yrs · TRP-2083-000418           │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  ▸ CBC  (in progress)      ▸ RFT (pending)         [Ctrl+←/→ switch panel]│
+│  ⚠ 1 critical value detected.                                             │
+│    Haemoglobin: 6.2 gm/dl                                                 │
+│    ☐ I confirm these results have been re-checked.                        │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  HAEMOGRAM ON CELL COUNTER                                                │
-│                                                                           │
-│  Test                        Result        Unit      Reference            │
+│  Test                        Result       Unit      Reference             │
 │  ─────────────────────────────────────────────────────────────────────    │
-│  Haemoglobin              [  11.2  ] L     gm/dl     Male : 12-18         │
-│  RBC Count                [   4.20 ]       mill/cumm 4.00-6.00           │
-│  PCV                      [  34.00 ] L     %         36.00-52.00         │
-│  MCV                      [  81.0  ]       fL        80.0-96.0           │
-│  MCH                      [ ______ ]  ◀    pg        27-32                │
-│  MCHC                     [        ]       %         31.5-34.5           │
-│  RDW                      [        ]       %         12.20-15.40         │
-│  TLC                      [        ]       /cmm      4000-11000          │
+│  Haemoglobin              [  11.2  ] L    gm/dl     Male : 12-18          │
+│  RBC Count                [   4.20 ]      mill/cumm 4.00-6.00             │
+│  MCH                      [ ______ ] ◀    pg        27-32                 │
 │                                                                           │
 │  Differential Leucocyte Count (DLC)                                       │
-│  Neutrophil               [        ]       %         40-70                │
-│  Lymphocytes              [        ]       %         20-45                │
-│  ...                                                                      │
+│  Neutrophil               [        ]      %         40-70                 │
 │                                                                           │
-│  Absolute Leucocyte Count                    ƒ calculated, read-only      │
-│  Neutrophils                  ——            /cmm     2000-7000           │
-│                                                                           │
+│  Absolute Leucocyte Count                   calculated automatically      │
+│  Neutrophils                 ——           /cmm      2000-7000            │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  8 of 25 entered · saved locally 2s ago                                   │
-│  [F9 Preview]  [Ctrl+S Save]  [Ctrl+R Mark ready for verification]        │
+│  8 of 25 entered          [ Save & preview → ]                            │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Interaction rules**
 
-- `Enter` or `↓` moves to the next analyte. Never requires the mouse.
-- The reference range sits on the same row, always visible. No hovering, no
-  clicking to reveal.
-- `L` / `H` markers appear the instant a value is typed.
-- Calculated rows show `——` until inputs exist, then fill live. They cannot be
-  focused by Tab, so they never interrupt the typing rhythm.
-- A **critical value** (Hb 6.2, platelets 18,000) stops the flow with a
-  confirmation dialog: *"Haemoglobin 6.2 gm/dl is a critical value. Confirm you
-  have re-checked this result."* — `Y` to confirm, `Esc` to correct. This is the
+- `Enter` or `↓` moves to the next analyte; `↑` goes back.
+- Calculated rows are skipped by the focus order entirely, so they never
+  interrupt the typing rhythm. They show `——` until their inputs exist.
+- The reference range sits on the same row, always visible. No hovering.
+- `L` / `H` appear the instant a value is typed.
+- A **critical value** blocks progress until explicitly confirmed. This is the
   only place the design deliberately interrupts.
-- Saved locally on every pause. The offline indicator is honest and always visible.
-- `Ctrl+←/→` switches between panels on a multi-panel order without leaving the
-  keyboard.
 
 ---
 
-## 6. Wireframe C — Verify and release
+## 4. Keyboard map
 
-```
-┌─ Verify report — TRP-2082-000418 ─────────────────────────────────────────┐
-│  Ram Bahadur Thapa   M / 45y   MRN 10294   Sample 2082-05-07             │
-│  Entered by: Sita Gurung, 2082-05-07 10:22                               │
-├───────────────────────────────────────────────────────────────────────────┤
-│  ⚠ 3 values outside reference range · 0 critical                          │
-│                                                                           │
-│  Haemoglobin        11.2  L    gm/dl    Male : 12-18                      │
-│  PCV                34.00 L    %        36.00-52.00                       │
-│  Eosinophils         8    H    %        00-06                             │
-│                                                                           │
-│  [ Space ] show all 25 values          [ F9 ] print preview               │
-├───────────────────────────────────────────────────────────────────────────┤
-│  Verifier: Dr. ____________  NMC ______                                   │
-│  Letterhead:  ( ) Full   (•) Preprinted stationery                        │
-│                                                                           │
-│  [ Ctrl+Enter  Release & Print ]   [ Ctrl+K  Return for correction ]      │
-└───────────────────────────────────────────────────────────────────────────┘
-```
-
-Abnormal values are surfaced first, because that is what a verifier actually
-checks. All values are one keystroke away.
-
----
-
-## 7. Print specification
-
-| Setting | Value |
-|---|---|
-| Paper | A4, 210 × 297 mm, portrait |
-| Margins | 15 mm left/right, 12 mm bottom |
-| Top reserve, preprinted mode | 45 mm on page 1, configurable in mm; 20 mm on later pages |
-| Top reserve, full letterhead | Letterhead block drawn by the app |
-| Body font | 10 pt serif-free, tabular figures |
-| Table columns | Test Name 46% · Result 16% · Unit 14% · Reference 24% |
-| Row height | 5.2 mm minimum, expanding for multi-line ranges |
-| Department band | Full width, centred, bold, 1pt rules above and below |
-| Flags | `H` / `L` in bold immediately after the value. **Never colour-only** — these print on a monochrome laser printer, so the marker must be a character. |
-| Footer | `End Of Report` centred; `Page n of m` right; verifier block on final page only |
-| Colour | Black only, except the letterhead logo in full-letterhead mode |
-
-**Alignment test sheet.** A printable page with a millimetre grid and crosshairs,
-so the admin can set the preprinted top reserve by measuring rather than guessing.
-This turns the most annoying part of setup into five minutes.
-
----
-
-## 8. Keyboard map
-
-### Global
-| Key | Action |
-|---|---|
-| `Ctrl+K` | Command palette — go anywhere |
-| `Ctrl+/` | Patient search, from any screen |
-| `Ctrl+N` | New patient |
-| `Ctrl+O` | New lab order |
-| `F1` | Shortcut help overlay |
-| `Ctrl+L` | Lock screen |
-| `Esc` | Close / cancel / step back |
-
-### Result entry
+### Implemented
 | Key | Action |
 |---|---|
 | `Enter` / `↓` | Next analyte |
 | `Shift+Enter` / `↑` | Previous analyte |
-| `Ctrl+←` / `Ctrl+→` | Previous / next panel |
-| `Ctrl+S` | Save |
-| `F9` | Print preview |
-| `Ctrl+R` | Mark ready for verification |
-| `Ctrl+D` | Copy this analyte's value from the patient's previous report |
 | First letter | Selects in a picklist (`P` → Pale yellow) |
+| `Tab` | Standard focus order, skipping calculated rows |
 
-### Verify
+### Planned, not yet built
 | Key | Action |
 |---|---|
-| `Space` | Toggle abnormal-only / all values |
-| `Ctrl+Enter` | Release and print |
-| `Ctrl+K` | Return for correction |
-| `Ctrl+P` | Reprint |
+| `Ctrl+K` | Command palette |
+| `Ctrl+/` | Patient search from anywhere |
+| `Ctrl+N` / `Ctrl+O` | New patient / new order |
+| `Ctrl+S` | Save |
+| `F9` | Print preview |
+| `Ctrl+D` | Copy this analyte from the patient's previous report |
+| `Ctrl+L` | Lock screen |
+| `F1` | Shortcut help overlay |
 
-`F1` shows this list in-app, and it prints onto a single sheet for taping to the
-wall above the bench. That sheet will do more for adoption than any amount of
-training.
+When these land, `F1` should show the list in-app and it should print onto one
+sheet for the wall above the bench. That sheet will do more for adoption than
+any amount of training.
 
 ---
 
-## 9. Accessibility
+## 5. Print specification
 
-- WCAG 2.1 AA, verified automatically in CI with axe. Violations fail the build.
+**The printed report is the actual product.** It is styled independently of the
+app UI and must not be "modernised" to match it.
+
+| Setting | Value |
+|---|---|
+| Paper | A4 portrait, `@page` margin 12mm 15mm |
+| Font | System stack, **not** Jakarta, 10pt |
+| Top reserve, preprinted mode | 45mm page 1, configurable in mm |
+| Table columns | Test 46% · Result 16% · Unit 14% · Reference 24% |
+| Department band | Full width, centred, bold, 1pt rules above and below |
+| Flags | `H` / `L` as **characters**, never colour alone |
+| Running footer | Patient name + Reg No on every page |
+| Colour | Black only, except the letterhead logo |
+
+Page-break rules: rows never split (`break-inside: avoid`), headings never
+orphan (`break-after: avoid`), `End Of Report` and the signature block appear
+only on the final page.
+
+**Still missing:** page numbers (`Page n of m`). Chrome cannot number pages from
+HTML; this needs the server-side PDF renderer described in
+`docs/05-report-engine.md` §6.
+
+---
+
+## 6. Data visualisation
+
+Series colours are `--series-1` `#2563EB`, `--series-2` `#EB6834`,
+`--series-3` `#1BAF7A`. Validated: all six checks pass at three slots, worst
+adjacent CVD ΔE 9.2, normal-vision ΔE 27.6.
+
+- The aqua slot sits below 3:1 contrast on white, so **every department bar
+  carries a direct value label** as the required relief. Do not remove those
+  labels.
+- Single-series charts need no legend — the card title names the series.
+- Never a dual-axis chart.
+- Status colours (`--success-*`, `--warning-*`, `--danger-*`) are reserved and
+  must never be reused as a series colour.
+
+---
+
+## 7. Accessibility
+
+- WCAG 2.1 AA is the target. **Not yet automated in CI** — see
+  `docs/09-quality-gates.md` Gate 7, which is still outstanding.
 - Focus is always visible; focus outlines are never removed.
-- Every input has a real associated label. Placeholder text is never the label.
-- Errors are announced to screen readers, not only shown in red.
-- Flags are conveyed by **letter and position**, never by colour alone — which
-  also happens to be why they print correctly in monochrome. Roughly 1 in 12 men
-  has a colour vision deficiency; in a lab of six people that is a real person.
-- Touch targets ≥ 44px, for later tablet use.
-- Full keyboard operability is a hard requirement here, not an accessibility
-  nicety — it is also the fastest way to work.
+- Every input has a real associated label; placeholder text is never the label.
+- Flags are conveyed by **letter and position**, never colour alone — which is
+  also why they print correctly in monochrome.
+- Disabled controls carry a `title` explaining *why*, not just a dimmed state.
+- Touch targets ≥ 44px for later tablet use in the ward.
+- Full keyboard operability is a hard requirement, not a nicety — it is also
+  the fastest way to work.
