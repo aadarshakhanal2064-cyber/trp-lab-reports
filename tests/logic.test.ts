@@ -126,6 +126,16 @@ test("interval boundaries are inclusive", () => {
   assert.equal(computeFlag(rbc, 6.01, "M", 45), "H");
 });
 
+test("A/G ratio flags against 1.1-2.5", () => {
+  const agRatio = findAnalyte("ag_ratio");
+  assert.ok(agRatio);
+  assert.equal(computeFlag(agRatio, 1.33, "M", 45), "N"); // liver-derived-values case above
+  assert.equal(computeFlag(agRatio, 1.1, "M", 45), "N");
+  assert.equal(computeFlag(agRatio, 2.5, "M", 45), "N");
+  assert.equal(computeFlag(agRatio, 1.0, "M", 45), "L");
+  assert.equal(computeFlag(agRatio, 2.6, "M", 45), "H");
+});
+
 test("one-sided limit never flags low", () => {
   const sgpt = findAnalyte("sgpt");
   assert.ok(sgpt);

@@ -295,7 +295,14 @@ const lft: Panel = {
       }),
     ),
     a(
-      num("ag_ratio", "A/G ratio", undefined, [], [{ kind: "none" }], {
+      // Not in the clinic's source PDF — added from a commonly-cited adult
+      // range (e.g. URMC Rochester's Health Encyclopedia). UNVERIFIED like
+      // everything else in this file; needs the lab in-charge to confirm
+      // it matches what their analyser/method actually expects before the
+      // "H"/"L" flag on this row is trusted. See docs/01-open-questions.md B6.
+      num("ag_ratio", "A/G ratio", undefined, ["1.1-2.5"], [
+        { kind: "interval", low: 1.1, high: 2.5 },
+      ], {
         decimals: 2,
         method: "Calculation",
         formula: (get) => ratio(get("alb"), get("glob")),
